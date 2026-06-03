@@ -1,0 +1,6 @@
+# CTF Suricata Rules - Managed by FlagMate
+# Auto-generated. Do not edit manually.
+
+alert tcp any any -> any any (msg:"CTF All TCP traffic"; sid:1000001; rev:1;)
+alert udp any any -> any any (msg:"CTF All UDP traffic"; sid:1000002; rev:1;)
+alert icmp any any -> any any (msg:"CTF All ICMP traffic"; sid:1000003; rev:1;)

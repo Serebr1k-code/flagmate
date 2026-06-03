@@ -1,0 +1,34 @@
+# Suricata configuration for FlagMate
+# This file should be mounted into the Suricata container
+
+%YAML 1.1
+---
+# EVE JSON output - Unix socket for FlagMate backend
+outputs:
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: /tmp/eve.sock
+      file-type: unix_stream
+      types:
+        - flow
+        - http
+        - alert
+        - dns
+        - tls
+        - stats
+
+# Default rule files
+default-rule-path: /etc/suricata/rules
+rule-files:
+  - ctf.rules
+
+# Run mode
+runmode: workers
+
+# Logging
+logging:
+  outputs:
+    - console:
+        enabled: yes
+        level: Info

@@ -1,0 +1,393 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "FlagMate API",
+    "description": "CTF Attack-Defence Suricata UI - REST API for traffic analysis, flow management, and ban flagging",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Local development server"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "Flow": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "service_id": { "type": "integer", "nullable": true },
+          "direction": { "type": "string" },
+          "start_ts": { "type": "string", "format": "date-time", "nullable": true },
+          "end_ts": { "type": "string", "format": "date-time", "nullable": true },
+          "raw_request": { "type": "object" },
+          "raw_response": { "type": "object" },
+          "hash": { "type": "string" },
+          "stable": { "type": "boolean" },
+          "checker": { "type": "boolean" },
+          "banned": { "type": "boolean" },
+          "response_code": { "type": "integer" },
+          "flow_id": { "type": "integer" },
+          "src_ip": { "type": "string" },
+          "dst_ip": { "type": "string" },
+          "src_port": { "type": "integer" },
+          "dst_port": { "type": "integer" },
+          "proto": { "type": "string" },
+          "pkt_count": { "type": "integer" },
+          "bytes_in": { "type": "integer" },
+          "bytes_out": { "type": "integer" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Service": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" },
+          "port": { "type": "integer" },
+          "protocol": { "type": "string", "enum": ["tcp", "udp"] },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Pattern": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "pattern": { "type": "string" },
+          "description": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "FlowGroup": {
+        "type": "object",
+        "properties": {
+          "hash": { "type": "string" },
+          "count": { "type": "integer" },
+          "example_flow_id": { "type": "string", "format": "uuid" },
+          "first_seen": { "type": "string", "format": "date-time" },
+          "last_seen": { "type": "string", "format": "date-time" }
+        }
+      },
+      "MirroringConfig": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ip": { "type": "string" },
+                "port": { "type": "integer" }
+              }
+            }
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["password"],
+        "properties": {
+          "password": { "type": "string" }
+        }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "properties": {
+          "token": { "type": "string" }
+        }
+      },
+      "LabelRequest": {
+        "type": "object",
+        "properties": {
+          "checker": { "type": "boolean" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/login": {
+      "post": {
+        "summary": "Authenticate with password",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LoginRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authentication successful",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/LoginResponse" }
+              }
+            }
+          },
+          "401": { "description": "Invalid password" }
+        }
+      }
+    },
+    "/services": {
+      "get": {
+        "summary": "List all monitored services",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "List of services",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Service" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Add a new service",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/Service" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Service created" },
+          "400": { "description": "Invalid request" }
+        }
+      }
+    },
+    "/services/{id}": {
+      "delete": {
+        "summary": "Delete a service",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "Service deleted" },
+          "404": { "description": "Service not found" }
+        }
+      }
+    },
+    "/patterns": {
+      "get": {
+        "summary": "List all ban patterns",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "List of patterns",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Pattern" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Add a new ban pattern",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/Pattern" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Pattern created" }
+        }
+      }
+    },
+    "/patterns/{id}": {
+      "delete": {
+        "summary": "Delete a pattern",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "Pattern deleted" }
+        }
+      }
+    },
+    "/flows": {
+      "get": {
+        "summary": "List flows with pagination and search",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "size", "in": "query", "schema": { "type": "integer", "default": 50 } },
+          { "name": "search", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated flow list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "flows": { "type": "array", "items": { "$ref": "#/components/schemas/Flow" } },
+                    "total": { "type": "integer" },
+                    "page": { "type": "integer" },
+                    "size": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/flows/{id}": {
+      "get": {
+        "summary": "Get flow details",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Flow details",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Flow" }
+              }
+            }
+          },
+          "404": { "description": "Flow not found" }
+        }
+      }
+    },
+    "/flows/{id}/label": {
+      "post": {
+        "summary": "Update flow checker label",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LabelRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Label updated" }
+        }
+      }
+    },
+    "/flows/{id}/ban": {
+      "post": {
+        "summary": "Flag flow as banned (only if response_code=200)",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": {
+          "200": { "description": "Flow flagged as banned" }
+        }
+      }
+    },
+    "/flow-groups": {
+      "get": {
+        "summary": "Get most frequent flow groups",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "top", "in": "query", "schema": { "type": "integer", "default": 20 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of flow groups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/FlowGroup" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mirroring": {
+      "get": {
+        "summary": "Get current mirroring configuration",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Mirroring config",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MirroringConfig" }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Update mirroring configuration",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/MirroringConfig" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Configuration updated" }
+        }
+      }
+    },
+    "/ws": {
+      "get": {
+        "summary": "WebSocket endpoint for real-time flow updates",
+        "responses": {
+          "101": { "description": "Switching Protocols - WebSocket connection established" }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "summary": "Prometheus metrics endpoint",
+        "responses": {
+          "200": {
+            "description": "Prometheus metrics in text format",
+            "content": {
+              "text/plain": {
+                "schema": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

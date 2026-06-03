@@ -1,0 +1,29 @@
+%YAML 1.1
+---
+default-log-dir: /var/log/suricata
+
+outputs:
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: /var/log/suricata/eve.json
+      types:
+        - flow
+        - http
+        - alert
+        - dns
+        - tls
+        - stats
+
+default-rule-path: /etc/suricata/rules
+
+rule-files:
+  - ctf.rules
+
+runmode: workers
+
+logging:
+  outputs:
+    - console:
+        enabled: yes
+        level: Info
