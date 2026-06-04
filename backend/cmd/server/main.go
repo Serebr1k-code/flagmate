@@ -5,10 +5,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"math"
@@ -551,18 +553,19 @@ func (a *App) buildPoisonResponse(r *http.Request) ([]byte, string, bool) {
 	}
 	key := clientRateKey(r)
 	if !a.allowPoisonImage(key) {
-		return []byte("poison image rate limited\n"), "text/plain; charset=utf-8", true
+		return []byte("Enough femboys for today\n"), "text/plain; charset=utf-8", true
 	}
 	images := a.poisonImages()
 	if len(images) == 0 {
-		return []byte("poison image unavailable\n"), "text/plain; charset=utf-8", false
+		return []byte("Idk why but femboy image is not loading\n"), "text/plain; charset=utf-8", false
 	}
 	path := images[rand.Intn(len(images))]
 	body, err := os.ReadFile(path)
 	if err != nil || len(body) == 0 {
-		return []byte("poison image read error\n"), "text/plain; charset=utf-8", false
+		return []byte("Idk why but femboy image is not loading\n"), "text/plain; charset=utf-8", false
 	}
-	return body, http.DetectContentType(body), false
+	contentType := mediaContentType(path, body)
+	return buildMediaPage(path, body, contentType), "text/html; charset=utf-8", false
 }
 
 func isBrowserLike(r *http.Request) bool {
@@ -612,7 +615,7 @@ func clientRateKey(r *http.Request) string {
 }
 
 func (a *App) poisonImages() []string {
-	allowed := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true}
+	allowed := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true, ".mp4": true, ".mov": true, ".mp3": true}
 	out := []string{}
 	_ = filepath.WalkDir(a.cfg.PoisonImageDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -624,6 +627,48 @@ func (a *App) poisonImages() []string {
 		return nil
 	})
 	return out
+}
+
+func mediaContentType(path string, body []byte) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".mp4":
+		return "video/mp4"
+	case ".mov":
+		return "video/quicktime"
+	case ".mp3":
+		return "audio/mpeg"
+	default:
+		return http.DetectContentType(body)
+	}
+}
+
+func buildMediaPage(path string, body []byte, contentType string) []byte {
+	dataURI := "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(body)
+	name := html.EscapeString(filepath.Base(path))
+	var media string
+	if strings.HasPrefix(contentType, "video/") {
+		media = `<video class="fit" src="` + dataURI + `" autoplay loop muted playsinline controls></video>`
+	} else if strings.HasPrefix(contentType, "audio/") {
+		media = `<div class="audio-wrap"><div class="title">` + name + `</div><audio src="` + dataURI + `" autoplay loop controls></audio></div>`
+	} else {
+		media = `<img class="fit" src="` + dataURI + `" alt="` + name + `" />`
+	}
+	page := `<!doctype html><html><head><meta charset="utf-8"><title>Flagmate</title><style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;}
+.fit{position:fixed;inset:0;width:100vw;height:100vh;object-fit:cover;background:#000;}
+.audio-wrap{width:100vw;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;background:radial-gradient(circle,#1f2937,#000);color:#fff;font-family:monospace;}
+.title{font-size:22px;opacity:.8;}
+audio{width:min(720px,80vw);}
+</style></head><body>` + media + `</body></html>`
+	return []byte(page)
 }
 
 func fakeFlagToken(seed string, i int) string {

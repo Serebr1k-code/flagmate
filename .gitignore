@@ -8,3 +8,4 @@ suricata-logs/
 sockets/
 .playwright-mcp/
 *.png
+!assets/femboy/**
