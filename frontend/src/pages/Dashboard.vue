@@ -17,11 +17,6 @@
         </button>
       </nav>
 
-      <div class="sidebar-theme">
-        <span class="theme-label">Theme</span>
-        <ThemeSwitcher />
-      </div>
-
       <div class="sidebar-footer">
         <button @click="authStore.logout(); router.push('/login')" class="nav-item text-destructive">
           Logout
@@ -65,12 +60,12 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import ThemeSwitcher from '@/components/ThemeSwitcher.vue'
 import FlowTable from '@/components/FlowTable.vue'
 import FlowGroups from '@/components/FlowGroups.vue'
 import ServiceManager from '@/components/ServiceManager.vue'
 import BanPanel from '@/components/BanPanel.vue'
 import MirroringSettings from '@/components/MirroringSettings.vue'
+import SettingsPanel from '@/components/SettingsPanel.vue'
 import FlowDetail from '@/components/FlowDetail.vue'
 import WordPicker from '@/components/WordPicker.vue'
 import type { Flow } from '@/types'
@@ -90,6 +85,7 @@ const tabs = [
   { id: 'services', label: 'Services', component: ServiceManager },
   { id: 'bans', label: 'Bans', component: BanPanel },
   { id: 'mirroring', label: 'Mirroring', component: MirroringSettings },
+  { id: 'settings', label: 'Settings', component: SettingsPanel },
 ]
 
 const currentComponent = computed(() => {
@@ -207,8 +203,6 @@ onUnmounted(() => window.removeEventListener('keydown', handleKeydown))
 .sidebar-header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 16px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
 .sidebar-header h2 { font-size: 20px; font-weight: 700; margin: 0; color: var(--primary); }
 .sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 4px; }
-.sidebar-theme { padding: 12px 0 16px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); }
-.theme-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
 .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.15s; width: 100%; text-align: left; background: transparent; color: var(--text-muted); }
 .nav-item:hover:not(.active) { background-color: var(--surface-hover); color: var(--text); }
 .nav-item.active { background-color: var(--surface-hover); color: var(--primary); font-weight: 600; }

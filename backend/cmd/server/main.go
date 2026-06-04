@@ -216,6 +216,8 @@ func main() {
 
 		pr.Get("/mirroring", app.getMirroring)
 		pr.Post("/mirroring", app.setMirroring)
+		pr.Get("/settings", app.getSettings)
+		pr.Post("/settings", app.setSettings)
 	})
 
 	log.Printf("backend listening on %s", cfg.ListenAddr)
@@ -275,7 +277,9 @@ func initSchema(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_flows_hash ON flows(hash);`,
 		`CREATE TABLE IF NOT EXISTS mirroring (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL DEFAULT 0, targets TEXT NOT NULL DEFAULT '[]');`,
 		`CREATE TABLE IF NOT EXISTS mirror_groups (hash TEXT PRIMARY KEY, service_id INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
+		`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
 		`INSERT OR IGNORE INTO mirroring(id, enabled, targets) VALUES (1, 0, '[]');`,
+		`INSERT OR IGNORE INTO settings(key, value) VALUES ('poison_mode', 'media');`,
 	}
 	for _, q := range queries {
 		if _, err := db.Exec(q); err != nil {
@@ -564,6 +568,9 @@ func buildGarbageResponse(req map[string]any, upstreamStatus int) string {
 }
 
 func (a *App) buildPoisonResponse(r *http.Request) ([]byte, string, bool) {
+	if a.poisonMode() == "flag" {
+		return []byte(randomFlagLine() + "\n"), "text/plain; charset=utf-8", false
+	}
 	if !isBrowserLike(r) {
 		return []byte(randomFlagLine() + "\n"), "text/plain; charset=utf-8", false
 	}
@@ -1519,6 +1526,42 @@ func (a *App) setMirroring(w http.ResponseWriter, r *http.Request) {
 	a.mirroring = cfg
 	a.mirrorMu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (a *App) getSettings(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"poison_mode": a.poisonMode()})
+}
+
+func (a *App) setSettings(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		PoisonMode string `json:"poison_mode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+	mode := strings.ToLower(strings.TrimSpace(in.PoisonMode))
+	if mode != "media" && mode != "flag" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid poison_mode"})
+		return
+	}
+	_, err := a.db.Exec(`INSERT INTO settings(key, value) VALUES ('poison_mode', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, mode)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "poison_mode": mode})
+}
+
+func (a *App) poisonMode() string {
+	var mode string
+	if err := a.db.QueryRow(`SELECT value FROM settings WHERE key = 'poison_mode'`).Scan(&mode); err != nil {
+		return "media"
+	}
+	if mode != "flag" && mode != "media" {
+		return "media"
+	}
+	return mode
 }
 
 func (a *App) forwardMirror(raw string) {

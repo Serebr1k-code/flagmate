@@ -9,33 +9,25 @@
           placeholder="Search flows..."
           @input="debouncedFetch"
         />
-        <select v-model="serviceFilter" class="select" @change="fetchFlows">
+        <select v-model="serviceFilter" class="select" @change="fetchFlows(true)">
           <option value="">All services</option>
           <option v-for="service in services" :key="service.id" :value="String(service.id)">
             {{ service.name }} :{{ service.port }}
           </option>
         </select>
         <label class="filter-check">
-          <input v-model="showBanned" type="checkbox" @change="fetchFlows" />
+          <input v-model="showBanned" type="checkbox" @change="fetchFlows(true)" />
           Banned
         </label>
         <label class="filter-check">
-          <input v-model="showChecker" type="checkbox" @change="fetchFlows" />
+          <input v-model="showChecker" type="checkbox" @change="fetchFlows(true)" />
           Checker
         </label>
-        <select
-          v-model="pageSize"
-          class="select"
-          @change="fetchFlows"
-        >
-          <option :value="25">25 per page</option>
-          <option :value="50">50 per page</option>
-          <option :value="100">100 per page</option>
-        </select>
+        <button class="btn btn-sm btn-outline" @click="fetchFlows(true)">Refresh</button>
       </div>
     </div>
 
-    <div class="table-container">
+    <div ref="tableContainer" class="table-container" @scroll="onTableScroll">
       <table class="table">
         <thead>
           <tr>
@@ -114,11 +106,8 @@
       </table>
     </div>
 
-    <div class="pagination">
-      <button class="btn btn-sm btn-outline" :disabled="page <= 1" @click="page--; fetchFlows()">Previous</button>
-      <span class="text-muted">Page {{ page }}</span>
-      <button class="btn btn-sm btn-outline" :disabled="flows.length < pageSize" @click="page++; fetchFlows()">Next</button>
-    </div>
+    <div v-if="loadingMore" class="load-state">Loading more flows...</div>
+    <div v-else-if="!hasMore && flows.length > 0" class="load-state">End of flows</div>
 
     <div v-if="selected.size > 0" class="selection-bar">
       <span>{{ selected.size }} flow(s) selected</span>
@@ -129,7 +118,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import api from '@/utils/api'
 import type { Flow, Service } from '@/types'
 
@@ -142,56 +131,33 @@ defineProps<{ selectedFlow?: Flow | null }>()
 
 const flows = ref<Flow[]>([])
 const page = ref(1)
-const pageSize = ref(50)
+const pageSize = 100
 const searchQuery = ref('')
 const serviceFilter = ref('')
 const showBanned = ref(true)
 const showChecker = ref(true)
 const services = ref<Service[]>([])
 const selected = ref(new Set<string>())
+const tableContainer = ref<HTMLElement | null>(null)
+const loadingMore = ref(false)
+const hasMore = ref(true)
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
-let ws: WebSocket | null = null
 
 const allSelected = computed(() => flows.value.length > 0 && selected.value.size === flows.value.length)
 
-function connectWebSocket() {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const wsUrl = `${protocol}//${window.location.host}/ws`
-  ws = new WebSocket(wsUrl)
-
-  ws.onopen = () => {
-    console.log('WebSocket connected')
+async function fetchFlows(reset = true) {
+  if (reset) {
+    page.value = 1
+    hasMore.value = true
+  } else {
+    if (loadingMore.value || !hasMore.value) return
+    loadingMore.value = true
+    page.value += 1
   }
-
-  ws.onmessage = (event) => {
-    try {
-      const flow: Flow = JSON.parse(event.data)
-      // Add new flow to the beginning of the list
-      flows.value.unshift(flow)
-      // Keep the list within page size limits
-      if (flows.value.length > pageSize.value) {
-        flows.value = flows.value.slice(0, pageSize.value)
-      }
-    } catch (e) {
-      console.error('Failed to parse flow:', e)
-    }
-  }
-
-  ws.onclose = () => {
-    console.log('WebSocket disconnected, reconnecting in 3s...')
-    setTimeout(connectWebSocket, 3000)
-  }
-
-  ws.onerror = () => {
-    ws?.close()
-  }
-}
-
-async function fetchFlows() {
   try {
     const params: Record<string, string> = {
       page: String(page.value),
-      size: String(pageSize.value),
+      size: String(pageSize),
     }
     if (searchQuery.value) {
       params.search = searchQuery.value
@@ -206,9 +172,13 @@ async function fetchFlows() {
       params.checker = 'false'
     }
     const { data } = await api.get('/flows', { params })
-    flows.value = data.flows
+    const rows = data.flows || []
+    flows.value = reset ? rows : [...flows.value, ...rows]
+    hasMore.value = rows.length === pageSize
   } catch (e) {
     console.error('Failed to fetch flows:', e)
+  } finally {
+    loadingMore.value = false
   }
 }
 
@@ -225,8 +195,16 @@ function debouncedFetch() {
   if (debounceTimer) clearTimeout(debounceTimer)
   debounceTimer = setTimeout(() => {
     page.value = 1
-    fetchFlows()
+    fetchFlows(true)
   }, 300)
+}
+
+function onTableScroll() {
+  const el = tableContainer.value
+  if (!el) return
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 900) {
+    fetchFlows(false)
+  }
 }
 
 function formatTime(ts: string) {
@@ -304,17 +282,12 @@ async function toggleMirror(flow: Flow) {
 
 onMounted(() => {
   fetchServices()
-  fetchFlows()
-  connectWebSocket()
-})
-
-onUnmounted(() => {
-  ws?.close()
+  fetchFlows(true)
 })
 </script>
 
 <style scoped>
-.flow-table-page { display: flex; flex-direction: column; gap: 16px; }
+.flow-table-page { display: flex; flex-direction: column; gap: 16px; height: calc(100vh - 48px); min-height: 0; }
 .flow-table-page.compact .page-header { align-items: flex-start; flex-direction: column; }
 .flow-table-page.compact .page-header h1 { font-size: 18px; }
 .flow-table-page.compact .header-actions { width: 100%; flex-direction: column; align-items: stretch; }
@@ -329,6 +302,7 @@ onUnmounted(() => {
 .page-header h1 { font-size: 24px; font-weight: 700; margin: 0; }
 .header-actions { display: flex; gap: 8px; align-items: center; }
 .header-actions .input { width: 250px; }
+.table-container { flex: 1; min-height: 0; overflow: auto; }
 .filter-check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); white-space: nowrap; }
 .flow-row { cursor: pointer; }
 .flow-row.negative-response td { background-color: rgba(245, 158, 11, 0.12); }
@@ -341,7 +315,7 @@ onUnmounted(() => {
 .flow-actions { display: flex; align-items: center; gap: 10px; }
 .mirror-btn { min-width: 76px; justify-content: center; }
 .flow-row:hover td { filter: brightness(1.05); }
-.pagination { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 12px; border-top: 1px solid var(--border); }
+.load-state { text-align: center; color: var(--text-muted); font-size: 12px; padding: 6px; }
 .selection-bar { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 12px 24px; border-radius: 12px; display: flex; align-items: center; gap: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); z-index: 100; background-color: var(--primary); color: var(--primary-foreground); }
 .text-muted { color: var(--text-muted); }
 .text-success { color: var(--success); }
