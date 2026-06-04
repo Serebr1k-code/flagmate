@@ -322,7 +322,7 @@ async function confirmUnbanFlow() {
 </script>
 
 <style scoped>
-.flow-detail-panel { background-color: var(--card); color: var(--card-foreground); border: 1px solid var(--border); border-radius: 12px; padding: 20px; height: calc(100vh - 48px); overflow-y: auto; box-shadow: 0 18px 48px rgba(0,0,0,0.28); }
+.flow-detail-panel { background-color: var(--card); color: var(--card-foreground); border: 1px solid var(--border); border-radius: 12px; padding: 20px; height: calc(100vh - 48px); width: 100%; box-sizing: border-box; overflow-y: auto; box-shadow: 0 18px 48px rgba(0,0,0,0.28); }
 .dialog-header { display: flex; align-items: center; justify-content: space-between; margin: -20px -20px 16px; padding: 16px 20px; position: sticky; top: -20px; z-index: 5; background-color: var(--card); border-bottom: 1px solid var(--border); }
 .dialog-title { font-size: 20px; font-weight: 600; margin: 0; }
 .hash-label { font-size: 13px; color: var(--text-muted); margin: 0 12px; }

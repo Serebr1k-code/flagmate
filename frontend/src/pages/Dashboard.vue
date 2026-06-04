@@ -157,6 +157,14 @@ async function onBanWords(words: string[]) {
     }
   }
   showWordPicker.value = false
+  if (selectedFlow.value) {
+    try {
+      const { data } = await api.get(`/flows/${selectedFlow.value.id}`)
+      selectedFlow.value = data
+    } catch (e) {
+      console.error('Failed to refresh selected flow after ban:', e)
+    }
+  }
   refreshCurrentComponent()
 }
 
@@ -189,6 +197,6 @@ onUnmounted(() => window.removeEventListener('keydown', handleKeydown))
 .text-destructive { color: var(--destructive); }
 .main-content { flex: 1; padding: 24px; overflow: hidden; background-color: var(--background); display: flex; gap: 18px; min-width: 0; }
 .content-pane { flex: 1 1 auto; min-width: 0; overflow-y: auto; transition: flex-basis 0.2s ease, max-width 0.2s ease; }
-.main-content.detail-open .content-pane { flex: 0 0 320px; max-width: 320px; }
-.detail-pane { flex: 1 1 auto; min-width: 0; overflow-y: auto; }
+.main-content.detail-open .content-pane { flex: 0 0 280px; max-width: 280px; }
+.detail-pane { flex: 1 1 0; min-width: 0; width: 100%; overflow-y: auto; }
 </style>
