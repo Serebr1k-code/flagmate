@@ -260,9 +260,18 @@ async function banSelected() {
 
 async function unbanFlow(flow: Flow) {
   try {
-    await api.post(`/flows/${flow.id}/unban`)
+    const { data } = await api.get(`/flows/${flow.id}/matching-patterns`)
+    const patterns = Array.isArray(data) ? data : []
+    if (patterns.length > 0) {
+      const list = patterns.map((p: { pattern: string }) => `- ${p.pattern}`).join('\n')
+      const ok = window.confirm(`Unban this flow? These service ban rules match it and will be deleted:\n\n${list}`)
+      if (!ok) return
+      await api.post(`/flows/${flow.id}/remove-matching-patterns`)
+    } else {
+      await api.post(`/flows/${flow.id}/unban`)
+    }
     flow.banned = false
-    fetchFlows()
+    await fetchFlows(true)
   } catch (e) {
     console.error('Failed to unban flow:', e)
   }
