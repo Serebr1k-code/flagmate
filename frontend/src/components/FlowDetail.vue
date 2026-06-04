@@ -275,14 +275,14 @@ function formatRequestPayload(raw: Record<string, any>): string {
   for (const [key, value] of Object.entries(headers)) lines.push(`${key}: ${value}`)
   lines.push('')
   lines.push('---')
-  lines.push(`method = ${method}`)
-  lines.push(`uri = ${uri}`)
-  if (query) lines.push(`query = ${query}`)
+  lines.push(`method: ${method}`)
+  lines.push(`uri: ${uri}`)
+  if (query) lines.push(`query: ${query}`)
   if (body) {
     lines.push('')
     lines.push(body)
   } else {
-    lines.push('payload = (empty)')
+    lines.push('payload: (empty)')
   }
   return lines.join('\n')
 }
@@ -296,12 +296,12 @@ function formatResponsePayload(raw: Record<string, any>, responseCode: number | 
   for (const [key, value] of Object.entries(headers)) lines.push(`${key}: ${value}`)
   lines.push('')
   lines.push('---')
-  if (status) lines.push(`status = ${status}`)
+  if (status) lines.push(`status: ${status}`)
   if (body) {
     lines.push('')
     lines.push(body)
   } else {
-    lines.push('payload = (empty)')
+    lines.push('payload: (empty)')
   }
   return lines.join('\n')
 }
