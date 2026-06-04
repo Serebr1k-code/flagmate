@@ -9,3 +9,10 @@ sockets/
 .playwright-mcp/
 *.png
 !assets/femboy/**
+*.log
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.pcap
+flow-detail-*.png
