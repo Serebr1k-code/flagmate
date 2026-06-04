@@ -142,7 +142,7 @@ import api from '@/utils/api'
 import type { Flow, Pattern } from '@/types'
 
 const props = defineProps<{ flow: Flow }>()
-const emit = defineEmits<{ close: []; checkerToggled: [flow: Flow]; banClicked: [flow: Flow] }>()
+const emit = defineEmits<{ close: []; checkerToggled: [flow: Flow]; banClicked: [flow: Flow]; flowUpdated: [flow: Flow] }>()
 
 const flowHistory = ref<Flow[]>([])
 const loading = ref(true)
@@ -288,9 +288,11 @@ async function confirmCheckerUnban() {
     await api.post(`/flows/${props.flow.id}/label`, { checker: true })
     props.flow.banned = false
     props.flow.checker = true
+    await fetchFlowHistory(true)
     matchingPatterns.value = []
     showCheckerConfirm.value = false
     emit('checkerToggled', props.flow)
+    emit('flowUpdated', props.flow)
   } catch (e) { console.error('Failed to mark checker after unban:', e) }
 }
 
@@ -308,6 +310,8 @@ async function unbanFlow() {
     }
     await api.post(`/flows/${props.flow.id}/unban`)
     props.flow.banned = false
+    await fetchFlowHistory(true)
+    emit('flowUpdated', props.flow)
   } catch (e) { console.error('Failed to unban flow:', e) }
 }
 
@@ -315,8 +319,10 @@ async function confirmUnbanFlow() {
   try {
     await api.post(`/flows/${props.flow.id}/remove-matching-patterns`)
     props.flow.banned = false
+    await fetchFlowHistory(true)
     matchingPatterns.value = []
     showUnbanConfirm.value = false
+    emit('flowUpdated', props.flow)
   } catch (e) { console.error('Failed to remove matching patterns:', e) }
 }
 </script>

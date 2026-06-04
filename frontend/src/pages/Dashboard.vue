@@ -43,6 +43,7 @@
         @close="selectedFlow = null"
         @checker-toggled="onCheckerToggled"
         @ban-clicked="onBanClicked"
+        @flow-updated="onFlowUpdated"
       />
     </main>
 
@@ -172,6 +173,18 @@ function onCheckerToggled(flow: Flow) {
   if (selectedFlow.value && selectedFlow.value.id === flow.id) {
     selectedFlow.value = { ...flow }
   }
+}
+
+async function onFlowUpdated(flow: Flow) {
+  if (selectedFlow.value && selectedFlow.value.id === flow.id) {
+    try {
+      const { data } = await api.get(`/flows/${flow.id}`)
+      selectedFlow.value = data
+    } catch {
+      selectedFlow.value = { ...flow }
+    }
+  }
+  refreshCurrentComponent()
 }
 
 function refreshCurrentComponent() {
