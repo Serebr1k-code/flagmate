@@ -270,20 +270,19 @@ function formatRequestPayload(raw: Record<string, any>): string {
   const query = stringValue(raw.query || '')
   const headers = normalizeHeaders(raw.headers)
   const body = stringValue(raw.body || '')
-  const vars = flattenPayload(raw, ['headers', 'body', 'method', 'uri', 'url', 'query'])
-
   const lines: string[] = []
+  lines.push(`${method} ${uri}${query ? `?${query}` : ''} HTTP`)
+  for (const [key, value] of Object.entries(headers)) lines.push(`${key}: ${value}`)
+  lines.push('')
+  lines.push('---')
   lines.push(`method = ${method}`)
   lines.push(`uri = ${uri}`)
   if (query) lines.push(`query = ${query}`)
-  for (const [key, value] of vars) lines.push(`${key} = ${value}`)
-  lines.push('')
-  lines.push('---')
-  lines.push(`${method} ${uri}${query ? `?${query}` : ''} HTTP`)
-  for (const [key, value] of Object.entries(headers)) lines.push(`${key}: ${value}`)
   if (body) {
     lines.push('')
     lines.push(body)
+  } else {
+    lines.push('payload = (empty)')
   }
   return lines.join('\n')
 }
@@ -292,18 +291,17 @@ function formatResponsePayload(raw: Record<string, any>, responseCode: number | 
   const status = Number(raw.status || responseCode || 0)
   const headers = normalizeHeaders(raw.headers)
   const body = stringValue(raw.body || '')
-  const vars = flattenPayload(raw, ['headers', 'body', 'status'])
-
   const lines: string[] = []
-  if (status) lines.push(`status = ${status}`)
-  for (const [key, value] of vars) lines.push(`${key} = ${value}`)
-  lines.push('')
-  lines.push('---')
   if (status) lines.push(`HTTP ${status}`)
   for (const [key, value] of Object.entries(headers)) lines.push(`${key}: ${value}`)
+  lines.push('')
+  lines.push('---')
+  if (status) lines.push(`status = ${status}`)
   if (body) {
     lines.push('')
     lines.push(body)
+  } else {
+    lines.push('payload = (empty)')
   }
   return lines.join('\n')
 }
@@ -315,22 +313,6 @@ function normalizeHeaders(raw: any): Record<string, string> {
     out[key] = Array.isArray(value) ? value.map(stringValue).join(', ') : stringValue(value)
   }
   return out
-}
-
-function flattenPayload(raw: Record<string, any>, skip: string[] = []): Array<[string, string]> {
-  const out: Array<[string, string]> = []
-  const skipSet = new Set(skip)
-  for (const [key, value] of Object.entries(raw)) {
-    if (skipSet.has(key)) continue
-    if (value === null || value === undefined || value === '') continue
-    if (typeof value === 'object') out.push([key, compactJSON(value)])
-    else out.push([key, stringValue(value)])
-  }
-  return out
-}
-
-function compactJSON(value: any): string {
-  try { return JSON.stringify(value) } catch { return stringValue(value) }
 }
 
 function stringValue(value: any): string {
