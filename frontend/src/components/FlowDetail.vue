@@ -270,16 +270,16 @@ function formatRequestPayload(raw: Record<string, any>): string {
   const query = stringValue(raw.query || '')
   const headers = normalizeHeaders(raw.headers)
   const body = stringValue(raw.body || '')
-  const vars = flattenPayload(raw, ['headers', 'body'])
+  const vars = flattenPayload(raw, ['headers', 'body', 'method', 'uri', 'url', 'query'])
 
-  const lines = ['Variables']
+  const lines: string[] = []
   lines.push(`method = ${method}`)
   lines.push(`uri = ${uri}`)
   if (query) lines.push(`query = ${query}`)
   for (const [key, value] of vars) lines.push(`${key} = ${value}`)
   for (const [key, value] of Object.entries(headers)) lines.push(`header.${key} = ${value}`)
   lines.push('')
-  lines.push('Extracted request text')
+  lines.push('---')
   lines.push(`${method} ${uri}${query ? `?${query}` : ''} HTTP`)
   for (const [key, value] of Object.entries(headers)) lines.push(`${key}: ${value}`)
   if (body) {
@@ -293,14 +293,14 @@ function formatResponsePayload(raw: Record<string, any>, responseCode: number | 
   const status = Number(raw.status || responseCode || 0)
   const headers = normalizeHeaders(raw.headers)
   const body = stringValue(raw.body || '')
-  const vars = flattenPayload(raw, ['headers', 'body'])
+  const vars = flattenPayload(raw, ['headers', 'body', 'status'])
 
-  const lines = ['Variables']
+  const lines: string[] = []
   if (status) lines.push(`status = ${status}`)
   for (const [key, value] of vars) lines.push(`${key} = ${value}`)
   for (const [key, value] of Object.entries(headers)) lines.push(`header.${key} = ${value}`)
   lines.push('')
-  lines.push('Extracted response text')
+  lines.push('---')
   if (status) lines.push(`HTTP ${status}`)
   for (const [key, value] of Object.entries(headers)) lines.push(`${key}: ${value}`)
   if (body) {
