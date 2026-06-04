@@ -116,6 +116,24 @@
       </div>
     </div>
   </Teleport>
+
+  <Teleport to="body">
+    <div v-if="showCheckerConfirm" class="confirm-overlay" @click.self="showCheckerConfirm = false">
+      <div class="confirm-dialog">
+        <h2>Mark banned flow as checker?</h2>
+        <p class="text-muted">Checkers must never be banned. These service ban rules match this flow and will be deleted before marking it as checker:</p>
+        <div class="confirm-list">
+          <span v-for="pattern in matchingPatterns" :key="pattern.id" class="confirm-chip">
+            {{ pattern.pattern }}
+          </span>
+        </div>
+        <div class="confirm-actions">
+          <button class="btn btn-outline" @click="showCheckerConfirm = false">Cancel</button>
+          <button class="btn btn-destructive" @click="confirmCheckerUnban">Delete rules and mark checker</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -132,6 +150,7 @@ const loadingMore = ref(false)
 const hasMore = ref(true)
 const pageSize = 100
 const showUnbanConfirm = ref(false)
+const showCheckerConfirm = ref(false)
 const matchingPatterns = ref<Pattern[]>([])
 
 const transcriptBlocks = computed(() => {
@@ -247,10 +266,32 @@ function formatPayload(block: typeof transcriptBlocks.value[0]): string {
 
 async function toggleChecker() {
   try {
+    if (!props.flow.checker && props.flow.banned) {
+      const { data } = await api.get(`/flows/${props.flow.id}/matching-patterns`)
+      matchingPatterns.value = Array.isArray(data) ? data : []
+      if (matchingPatterns.value.length > 0) {
+        showCheckerConfirm.value = true
+        return
+      }
+      await api.post(`/flows/${props.flow.id}/unban`)
+      props.flow.banned = false
+    }
     await api.post(`/flows/${props.flow.id}/label`, { checker: !props.flow.checker })
     props.flow.checker = !props.flow.checker
     emit('checkerToggled', props.flow)
   } catch (e) { console.error('Failed to toggle checker:', e) }
+}
+
+async function confirmCheckerUnban() {
+  try {
+    await api.post(`/flows/${props.flow.id}/remove-matching-patterns`)
+    await api.post(`/flows/${props.flow.id}/label`, { checker: true })
+    props.flow.banned = false
+    props.flow.checker = true
+    matchingPatterns.value = []
+    showCheckerConfirm.value = false
+    emit('checkerToggled', props.flow)
+  } catch (e) { console.error('Failed to mark checker after unban:', e) }
 }
 
 async function banFlow() {

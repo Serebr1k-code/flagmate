@@ -1174,7 +1174,12 @@ func (a *App) labelFlow(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
 		return
 	}
-	_, err := a.db.Exec(`UPDATE flows SET checker = ? WHERE id = ?`, boolInt(in.Checker), id)
+	var err error
+	if in.Checker {
+		_, err = a.db.Exec(`UPDATE flows SET checker = 1, banned = 0 WHERE id = ?`, id)
+	} else {
+		_, err = a.db.Exec(`UPDATE flows SET checker = 0 WHERE id = ?`, id)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

@@ -15,6 +15,7 @@ Open `http://<your-ip>:3000` and log in with `admin` unless you changed `UI_PASS
 
 - **Backend**: Go API, WebSocket live updates, SQLite storage, Suricata Unix socket ingest.
 - **Frontend**: Vue 3 + TypeScript dashboard for flows, services, bans, groups, and mirroring.
+- **Suricata**: bundled Compose service with `unix_stream` EVE output into the backend socket.
 - **Inline HTTP gate**: proxies protected HTTP services and can replace banned responses before clients receive them.
 - **Service-scoped bans**: every service has its own banned words, regexes, and endpoint/path rules.
 - **Realtime flow history**: flow details load lazily in pages of 100 records for large repeated flows.
@@ -25,6 +26,19 @@ Open `http://<your-ip>:3000` and log in with `admin` unless you changed `UI_PASS
 - `3000`: frontend UI
 - `8080`: backend API
 - `18080`: default inline HTTP gate port for the bundled test service
+
+## Suricata in Docker
+
+`docker compose up -d` starts Suricata too. The Suricata container uses host networking and captures `${SURICATA_INTERFACE:-lo}` by default.
+On Linux attack-defense boxes this means the one-command deploy includes the UI, backend, gate, test service, and Suricata.
+
+If your protected traffic is not on loopback, set the interface before starting:
+
+```bash
+SURICATA_INTERFACE=eth0 docker compose up -d
+```
+
+Suricata needs Linux capabilities (`NET_ADMIN`, `NET_RAW`, `SYS_NICE`) and host networking, so this setup is intended for Linux hosts.
 
 ## Suricata ingest
 
@@ -67,6 +81,7 @@ GATE_ENABLED=true
 GATE_LISTEN=:18080
 GATE_UPSTREAM=http://testservice:18080
 POISON_IMAGE_DIR=/app/poison-images
+SURICATA_INTERFACE=lo
 ```
 
 ## Architecture

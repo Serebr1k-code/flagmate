@@ -39,6 +39,21 @@ services:
       flagmate:
         ipv4_address: 172.28.0.4
 
+  suricata:
+    image: jasonish/suricata:latest
+    command: ["suricata", "-c", "/etc/suricata/suricata.yaml", "-i", "${SURICATA_INTERFACE:-lo}", "-l", "/var/log/suricata", "-S", "/etc/suricata/rules/ctf.rules"]
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_NICE
+    volumes:
+      - ./suricata.yaml:/etc/suricata/suricata.yaml:ro
+      - ./rules:/etc/suricata/rules:ro
+      - ./sockets:/var/run/suricata
+      - ./suricata-logs:/var/log/suricata
+    restart: unless-stopped
+
   frontend:
     build:
       context: ./frontend
