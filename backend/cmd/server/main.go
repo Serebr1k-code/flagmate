@@ -106,15 +106,17 @@ type WS struct {
 }
 
 type App struct {
-	cfg        Config
-	db         *sql.DB
-	ws         *WS
-	upgrader   websocket.Upgrader
-	mirrorMu   sync.RWMutex
-	mirroring  MirroringConfig
-	mirrorDue  map[int]time.Time
-	poisonMu   sync.Mutex
-	poisonHits map[string][]time.Time
+	cfg              Config
+	db               *sql.DB
+	ws               *WS
+	upgrader         websocket.Upgrader
+	mirrorMu         sync.RWMutex
+	mirroring        MirroringConfig
+	mirrorDue        map[int]time.Time
+	poisonMu         sync.Mutex
+	poisonHits       map[string][]time.Time
+	poisonFlagMinute int64
+	poisonFlag       string
 }
 
 type MirroringConfig struct {
@@ -569,10 +571,10 @@ func buildGarbageResponse(req map[string]any, upstreamStatus int) string {
 
 func (a *App) buildPoisonResponse(r *http.Request) ([]byte, string, bool) {
 	if a.poisonMode() == "flag" {
-		return []byte(randomFlagLine() + "\n"), "text/plain; charset=utf-8", false
+		return []byte(a.currentFlagLine() + "\n"), "text/plain; charset=utf-8", false
 	}
 	if !isBrowserLike(r) {
-		return []byte(randomFlagLine() + "\n"), "text/plain; charset=utf-8", false
+		return []byte(a.currentFlagLine() + "\n"), "text/plain; charset=utf-8", false
 	}
 	key := clientRateKey(r)
 	if !a.allowPoisonImage(key) {
@@ -595,6 +597,18 @@ func isBrowserLike(r *http.Request) bool {
 	ua := strings.ToLower(r.Header.Get("User-Agent"))
 	accept := strings.ToLower(r.Header.Get("Accept"))
 	return strings.Contains(ua, "mozilla") || strings.Contains(accept, "text/html") || strings.Contains(accept, "image/")
+}
+
+func (a *App) currentFlagLine() string {
+	minute := time.Now().Unix() / 60
+	a.poisonMu.Lock()
+	defer a.poisonMu.Unlock()
+	if a.poisonFlagMinute == minute && a.poisonFlag != "" {
+		return a.poisonFlag
+	}
+	a.poisonFlagMinute = minute
+	a.poisonFlag = randomFlagLine()
+	return a.poisonFlag
 }
 
 func randomFlagLine() string {
