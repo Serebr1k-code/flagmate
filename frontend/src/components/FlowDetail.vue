@@ -277,7 +277,6 @@ function formatRequestPayload(raw: Record<string, any>): string {
   lines.push(`uri = ${uri}`)
   if (query) lines.push(`query = ${query}`)
   for (const [key, value] of vars) lines.push(`${key} = ${value}`)
-  for (const [key, value] of Object.entries(headers)) lines.push(`header.${key} = ${value}`)
   lines.push('')
   lines.push('---')
   lines.push(`${method} ${uri}${query ? `?${query}` : ''} HTTP`)
@@ -298,7 +297,6 @@ function formatResponsePayload(raw: Record<string, any>, responseCode: number | 
   const lines: string[] = []
   if (status) lines.push(`status = ${status}`)
   for (const [key, value] of vars) lines.push(`${key} = ${value}`)
-  for (const [key, value] of Object.entries(headers)) lines.push(`header.${key} = ${value}`)
   lines.push('')
   lines.push('---')
   if (status) lines.push(`HTTP ${status}`)
