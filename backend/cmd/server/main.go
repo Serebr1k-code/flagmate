@@ -1100,6 +1100,7 @@ func (a *App) deletePattern(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	a.recalculateBannedFlows()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -1117,6 +1118,7 @@ func (a *App) togglePattern(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	a.recalculateBannedFlows()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -1229,6 +1231,9 @@ func (a *App) labelFlow(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	if in.Checker {
+		a.recalculateBannedFlows()
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -1239,6 +1244,7 @@ func (a *App) unbanFlow(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	a.recalculateBannedFlows()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -1263,6 +1269,7 @@ func (a *App) removeMatchingPatternsForFlow(w http.ResponseWriter, r *http.Reque
 		_, _ = a.db.Exec(`DELETE FROM patterns WHERE id = ?`, p.ID)
 	}
 	_, _ = a.db.Exec(`UPDATE flows SET banned = 0 WHERE id = ?`, flow.ID)
+	a.recalculateBannedFlows()
 	writeJSON(w, http.StatusOK, map[string]any{"removed": patterns})
 }
 
@@ -1311,6 +1318,24 @@ func (a *App) matchingPatterns(flow Flow) []Pattern {
 		}
 	}
 	return out
+}
+
+func (a *App) recalculateBannedFlows() {
+	rows, err := a.db.Query(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows WHERE banned = 1`)
+	if err != nil {
+		log.Printf("recalculate banned flows query error: %v", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		flow, err := scanFlow(rows)
+		if err != nil {
+			continue
+		}
+		if flow.Checker || len(a.matchingPatterns(flow)) == 0 {
+			_, _ = a.db.Exec(`UPDATE flows SET banned = 0 WHERE id = ?`, flow.ID)
+		}
+	}
 }
 
 func (a *App) uniqueWords(w http.ResponseWriter, r *http.Request) {
