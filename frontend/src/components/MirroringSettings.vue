@@ -143,6 +143,9 @@ onMounted(fetchConfig)
 .check-row { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
 .interval-row { display: flex; align-items: center; gap: 8px; }
 .interval-input { width: 100px; }
+.interval-input::-webkit-outer-spin-button,
+.interval-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.interval-input { -moz-appearance: textfield; appearance: textfield; }
 .targets-list { display: flex; flex-direction: column; gap: 8px; }
 .target-item { display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background-color: var(--surface); }
 .add-target-form { display: flex; gap: 8px; flex-wrap: wrap; }

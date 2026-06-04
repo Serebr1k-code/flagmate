@@ -67,7 +67,7 @@
               <input type="checkbox" class="checkbox" :checked="selected.has(flow.id)" @change="toggleSelect(flow.id)" />
             </td>
             <td v-if="!selectedFlow" class="text-muted">{{ formatTime(flow.created_at) }}</td>
-            <td>{{ flow.direction }}</td>
+            <td>{{ displayDirection(flow) }}</td>
             <td v-if="!selectedFlow">
               <span class="badge badge-outline">{{ flow.proto }}</span>
             </td>
@@ -81,7 +81,7 @@
                 {{ flow.response_code }}
               </span>
             </td>
-            <td v-if="!selectedFlow" @click.stop>
+            <td v-if="!selectedFlow" class="flow-actions" @click.stop>
               <button
                 v-if="flow.response_code === 200 && !flow.banned"
                 class="btn btn-sm btn-destructive"
@@ -97,7 +97,7 @@
                 Unban
               </button>
               <button
-                class="btn btn-sm"
+                class="btn btn-sm mirror-btn"
                 :class="flow.mirrored ? 'btn-success' : 'btn-outline'"
                 @click="toggleMirror(flow)"
               >
@@ -241,6 +241,13 @@ function isPositiveResponse(code: number) {
   return code === 101 || (code >= 200 && code < 400)
 }
 
+function displayDirection(flow: Flow) {
+  const uri = String(flow.raw_request?.uri || flow.raw_request?.url || '')
+  if (uri) return `${flow.dst_port}${uri.startsWith('/') ? uri : `/${uri}`}`
+  if (flow.destination) return flow.destination.replace(/^.*?:(\d+)/, '$1')
+  return `${flow.dst_port}`
+}
+
 function toggleSelect(id: string) {
   if (selected.value.has(id)) {
     selected.value.delete(id)
@@ -328,6 +335,8 @@ onUnmounted(() => {
 .flow-row.banned.negative-response td { background-color: color-mix(in srgb, var(--destructive) 14%, transparent); }
 .flow-row.banned:hover td,
 .flow-row.banned.negative-response:hover td { background-color: color-mix(in srgb, var(--destructive) 20%, transparent); }
+.flow-actions { display: flex; align-items: center; gap: 10px; }
+.mirror-btn { min-width: 76px; justify-content: center; }
 .flow-row:hover td { filter: brightness(1.05); }
 .pagination { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 12px; border-top: 1px solid var(--border); }
 .selection-bar { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 12px 24px; border-radius: 12px; display: flex; align-items: center; gap: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); z-index: 100; background-color: var(--primary); color: var(--primary-foreground); }
