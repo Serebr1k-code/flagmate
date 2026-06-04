@@ -663,7 +663,7 @@ func buildMediaPage(path string, body []byte, contentType string) []byte {
 	}
 	page := `<!doctype html><html><head><meta charset="utf-8"><title>Flagmate</title><style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;}
-.fit{position:fixed;inset:0;width:100vw;height:100vh;object-fit:cover;background:#000;}
+.fit{position:fixed;inset:0;width:100vw;height:100vh;object-fit:contain;background:#000;}
 .audio-wrap{width:100vw;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;background:radial-gradient(circle,#1f2937,#000);color:#fff;font-family:monospace;}
 .title{font-size:22px;opacity:.8;}
 audio{width:min(720px,80vw);}
