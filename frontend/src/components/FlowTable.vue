@@ -81,28 +81,30 @@
                 {{ flow.response_code }}
               </span>
             </td>
-            <td v-if="!selectedFlow" class="flow-actions" @click.stop>
-              <button
-                v-if="flow.response_code === 200 && !flow.banned"
-                class="btn btn-sm btn-destructive"
-                @click="$emit('open-word-picker', flow)"
-              >
-                Ban
-              </button>
-              <button
-                v-else-if="flow.banned"
-                class="btn btn-sm btn-outline"
-                @click="unbanFlow(flow)"
-              >
-                Unban
-              </button>
-              <button
-                class="btn btn-sm mirror-btn"
-                :class="flow.mirrored ? 'btn-success' : 'btn-outline'"
-                @click="toggleMirror(flow)"
-              >
-                {{ flow.mirrored ? 'Mirrored' : 'Mirror' }}
-              </button>
+            <td v-if="!selectedFlow" class="flow-actions-cell" @click.stop>
+              <div class="flow-actions">
+                <button
+                  v-if="flow.response_code === 200 && !flow.banned"
+                  class="btn btn-sm btn-destructive"
+                  @click="$emit('open-word-picker', flow)"
+                >
+                  Ban
+                </button>
+                <button
+                  v-else-if="flow.banned"
+                  class="btn btn-sm btn-outline"
+                  @click="unbanFlow(flow)"
+                >
+                  Unban
+                </button>
+                <button
+                  class="btn btn-sm mirror-btn"
+                  :class="flow.mirrored ? 'btn-success' : 'btn-outline'"
+                  @click="toggleMirror(flow)"
+                >
+                  {{ flow.mirrored ? 'Mirrored' : 'Mirror' }}
+                </button>
+              </div>
             </td>
           </tr>
           <tr v-if="flows.length === 0">
@@ -335,6 +337,7 @@ onUnmounted(() => {
 .flow-row.banned.negative-response td { background-color: color-mix(in srgb, var(--destructive) 14%, transparent); }
 .flow-row.banned:hover td,
 .flow-row.banned.negative-response:hover td { background-color: color-mix(in srgb, var(--destructive) 20%, transparent); }
+.flow-actions-cell { min-width: 170px; }
 .flow-actions { display: flex; align-items: center; gap: 10px; }
 .mirror-btn { min-width: 76px; justify-content: center; }
 .flow-row:hover td { filter: brightness(1.05); }
