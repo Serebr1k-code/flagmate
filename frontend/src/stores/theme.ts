@@ -3,7 +3,7 @@ import { ref, watch } from 'vue'
 import { themes, type ThemeName } from '@/themes'
 
 export const useThemeStore = defineStore('theme', () => {
-  const currentTheme = ref<ThemeName>(localStorage.getItem('theme') as ThemeName || 'midnight')
+  const currentTheme = ref<ThemeName>(readThemeCookie() || 'midnight')
 
   function applyTheme(name: ThemeName) {
     const theme = themes[name]
@@ -41,7 +41,7 @@ export const useThemeStore = defineStore('theme', () => {
     root.style.setProperty('--popover-foreground', colors.popoverForeground)
 
     currentTheme.value = name
-    localStorage.setItem('theme', name)
+    writeThemeCookie(name)
   }
 
   watch(currentTheme, (name) => applyTheme(name))
@@ -54,3 +54,19 @@ export const useThemeStore = defineStore('theme', () => {
     applyTheme
   }
 })
+
+function readThemeCookie(): ThemeName | null {
+  const cookie = document.cookie
+    .split('; ')
+    .find(row => row.startsWith('flagmate_theme='))
+  const value = cookie ? decodeURIComponent(cookie.split('=')[1] || '') : ''
+  if (value && value in themes) return value as ThemeName
+
+  const migrated = localStorage.getItem('theme')
+  if (migrated && migrated in themes) return migrated as ThemeName
+  return null
+}
+
+function writeThemeCookie(name: ThemeName) {
+  document.cookie = `flagmate_theme=${encodeURIComponent(name)}; path=/; max-age=31536000; samesite=lax`
+}

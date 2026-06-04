@@ -598,12 +598,12 @@ func isBrowserLike(r *http.Request) bool {
 }
 
 func randomFlagLine() string {
-	const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-=+"
+	const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, 32)
 	for i := range b {
 		b[i] = alphabet[rand.Intn(len(alphabet))]
 	}
-	return "flag{" + string(b) + "}"
+	return string(b)
 }
 
 func (a *App) allowPoisonImage(key string) bool {
