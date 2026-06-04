@@ -1087,8 +1087,15 @@ func (a *App) createPattern(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err := a.db.Exec(`INSERT INTO patterns(service_id,pattern,description,mode,active,created_at) VALUES (?,?,?,?,?,?)`, intPtrToAny(in.ServiceID), in.Pattern, in.Description, mode, 1, time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
-		return
+		res, updateErr := a.db.Exec(`UPDATE patterns SET service_id = ?, description = ?, mode = ?, active = 1 WHERE pattern = ?`, intPtrToAny(in.ServiceID), in.Description, mode, in.Pattern)
+		if updateErr != nil {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		if changed, _ := res.RowsAffected(); changed == 0 {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 	a.recalculateAllFlowBans()
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "ok"})
