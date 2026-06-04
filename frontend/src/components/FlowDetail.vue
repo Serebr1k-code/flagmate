@@ -261,7 +261,83 @@ function isPositiveResponse(code: number) {
 function formatPayload(block: typeof transcriptBlocks.value[0]): string {
   const raw = block.raw_request || block.raw_response
   if (!raw) return '(empty)'
-  try { return JSON.stringify(raw, null, 2) } catch { return String(raw) }
+  return block.raw_request ? formatRequestPayload(raw) : formatResponsePayload(raw, block.response_code)
+}
+
+function formatRequestPayload(raw: Record<string, any>): string {
+  const method = stringValue(raw.method || 'GET')
+  const uri = stringValue(raw.uri || raw.url || '/')
+  const query = stringValue(raw.query || '')
+  const headers = normalizeHeaders(raw.headers)
+  const body = stringValue(raw.body || '')
+  const vars = flattenPayload(raw, ['headers', 'body'])
+
+  const lines = ['Variables']
+  lines.push(`method = ${method}`)
+  lines.push(`uri = ${uri}`)
+  if (query) lines.push(`query = ${query}`)
+  for (const [key, value] of vars) lines.push(`${key} = ${value}`)
+  for (const [key, value] of Object.entries(headers)) lines.push(`header.${key} = ${value}`)
+  lines.push('')
+  lines.push('Extracted request text')
+  lines.push(`${method} ${uri}${query ? `?${query}` : ''} HTTP`)
+  for (const [key, value] of Object.entries(headers)) lines.push(`${key}: ${value}`)
+  if (body) {
+    lines.push('')
+    lines.push(body)
+  }
+  return lines.join('\n')
+}
+
+function formatResponsePayload(raw: Record<string, any>, responseCode: number | null): string {
+  const status = Number(raw.status || responseCode || 0)
+  const headers = normalizeHeaders(raw.headers)
+  const body = stringValue(raw.body || '')
+  const vars = flattenPayload(raw, ['headers', 'body'])
+
+  const lines = ['Variables']
+  if (status) lines.push(`status = ${status}`)
+  for (const [key, value] of vars) lines.push(`${key} = ${value}`)
+  for (const [key, value] of Object.entries(headers)) lines.push(`header.${key} = ${value}`)
+  lines.push('')
+  lines.push('Extracted response text')
+  if (status) lines.push(`HTTP ${status}`)
+  for (const [key, value] of Object.entries(headers)) lines.push(`${key}: ${value}`)
+  if (body) {
+    lines.push('')
+    lines.push(body)
+  }
+  return lines.join('\n')
+}
+
+function normalizeHeaders(raw: any): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (!raw || typeof raw !== 'object') return out
+  for (const [key, value] of Object.entries(raw)) {
+    out[key] = Array.isArray(value) ? value.map(stringValue).join(', ') : stringValue(value)
+  }
+  return out
+}
+
+function flattenPayload(raw: Record<string, any>, skip: string[] = []): Array<[string, string]> {
+  const out: Array<[string, string]> = []
+  const skipSet = new Set(skip)
+  for (const [key, value] of Object.entries(raw)) {
+    if (skipSet.has(key)) continue
+    if (value === null || value === undefined || value === '') continue
+    if (typeof value === 'object') out.push([key, compactJSON(value)])
+    else out.push([key, stringValue(value)])
+  }
+  return out
+}
+
+function compactJSON(value: any): string {
+  try { return JSON.stringify(value) } catch { return stringValue(value) }
+}
+
+function stringValue(value: any): string {
+  if (value === null || value === undefined) return ''
+  return String(value)
 }
 
 async function toggleChecker() {
