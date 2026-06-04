@@ -59,7 +59,7 @@
               stable: flow.stability_pct >= 70,
               banned: flow.banned,
               selected: selectedFlow?.id === flow.id,
-              'negative-response': !isPositiveResponse(flow.response_code)
+              'negative-response': !flow.banned && !isPositiveResponse(flow.response_code)
             }"
             @click="$emit('open-flow', flow)"
           >
@@ -305,6 +305,10 @@ onUnmounted(() => {
 .flow-row { cursor: pointer; }
 .flow-row.negative-response td { background-color: rgba(245, 158, 11, 0.12); }
 .flow-row.negative-response:hover td { background-color: rgba(245, 158, 11, 0.18); }
+.flow-row.banned td,
+.flow-row.banned.negative-response td { background-color: color-mix(in srgb, var(--destructive) 14%, transparent); }
+.flow-row.banned:hover td,
+.flow-row.banned.negative-response:hover td { background-color: color-mix(in srgb, var(--destructive) 20%, transparent); }
 .flow-row:hover td { filter: brightness(1.05); }
 .pagination { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 12px; border-top: 1px solid var(--border); }
 .selection-bar { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 12px 24px; border-radius: 12px; display: flex; align-items: center; gap: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); z-index: 100; background-color: var(--primary); color: var(--primary-foreground); }

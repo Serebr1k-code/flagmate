@@ -63,7 +63,7 @@
             v-for="(block, idx) in transcriptBlocks"
             :key="idx"
             class="transcript-block"
-            :class="[block.isIncoming ? 'block-incoming' : 'block-outgoing', { banned: block.banned, checker: block.checker, 'negative-response': !block.isIncoming && block.response_code !== null && !isPositiveResponse(block.response_code) }]"
+            :class="[block.isIncoming ? 'block-incoming' : 'block-outgoing', { banned: block.banned, checker: block.checker, 'negative-response': !block.banned && !block.isIncoming && block.response_code !== null && !isPositiveResponse(block.response_code) }]"
           >
             <div class="block-header">
               <span class="block-time">{{ formatTime(block.created_at) }}</span>
