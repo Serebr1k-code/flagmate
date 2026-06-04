@@ -86,6 +86,7 @@ type Flow struct {
 	Destination  string         `json:"destination"`
 	Checker      bool           `json:"checker"`
 	Banned       bool           `json:"banned"`
+	Mirrored     bool           `json:"mirrored"`
 	ResponseCode int            `json:"response_code"`
 	FlowID       int64          `json:"flow_id"`
 	SrcIP        string         `json:"src_ip"`
@@ -111,13 +112,22 @@ type App struct {
 	upgrader   websocket.Upgrader
 	mirrorMu   sync.RWMutex
 	mirroring  MirroringConfig
+	mirrorDue  map[int]time.Time
 	poisonMu   sync.Mutex
 	poisonHits map[string][]time.Time
 }
 
 type MirroringConfig struct {
-	Enabled bool           `json:"enabled"`
-	Targets []MirrorTarget `json:"targets"`
+	Enabled  bool                  `json:"enabled"`
+	Targets  []MirrorTarget        `json:"targets"`
+	Services []ServiceMirrorConfig `json:"services"`
+}
+
+type ServiceMirrorConfig struct {
+	ServiceID       int            `json:"service_id"`
+	Enabled         bool           `json:"enabled"`
+	IntervalSeconds int            `json:"interval_seconds"`
+	Targets         []MirrorTarget `json:"targets"`
 }
 
 type MirrorTarget struct {
@@ -157,12 +167,14 @@ func main() {
 			CheckOrigin:     func(_ *http.Request) bool { return true },
 		},
 		poisonHits: map[string][]time.Time{},
+		mirrorDue:  map[int]time.Time{},
 	}
 	app.loadMirroring()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go app.startSuricataListener(ctx)
+	go app.startMirrorScheduler(ctx)
 	if cfg.GateEnabled {
 		go app.startHTTPGate(ctx)
 	}
@@ -195,6 +207,7 @@ func main() {
 		pr.Get("/flows/{id}", app.getFlow)
 		pr.Get("/flows/{id}/unique-words", app.uniqueWords)
 		pr.Post("/flows/{id}/label", app.labelFlow)
+		pr.Post("/flows/{id}/mirror", app.mirrorFlowGroup)
 		pr.Post("/flows/{id}/unban", app.unbanFlow)
 		pr.Get("/flows/{id}/matching-patterns", app.matchingPatternsForFlow)
 		pr.Post("/flows/{id}/remove-matching-patterns", app.removeMatchingPatternsForFlow)
@@ -261,6 +274,7 @@ func initSchema(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_flows_created_at ON flows(created_at DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_flows_hash ON flows(hash);`,
 		`CREATE TABLE IF NOT EXISTS mirroring (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL DEFAULT 0, targets TEXT NOT NULL DEFAULT '[]');`,
+		`CREATE TABLE IF NOT EXISTS mirror_groups (hash TEXT PRIMARY KEY, service_id INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
 		`INSERT OR IGNORE INTO mirroring(id, enabled, targets) VALUES (1, 0, '[]');`,
 	}
 	for _, q := range queries {
@@ -269,7 +283,9 @@ func initSchema(db *sql.DB) error {
 		}
 	}
 	_, _ = db.Exec(`ALTER TABLE patterns ADD COLUMN service_id INTEGER NULL`)
+	_, _ = db.Exec(`ALTER TABLE mirroring ADD COLUMN services TEXT NOT NULL DEFAULT '[]'`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_patterns_service ON patterns(service_id)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_mirror_groups_service ON mirror_groups(service_id)`)
 	return nil
 }
 
@@ -913,6 +929,15 @@ func (a *App) enrichFlow(f *Flow) {
 	f.StabilityPct = pct
 	f.AvgInterval = avg
 	f.Stable = pct >= 70
+	f.Mirrored = a.isMirroredGroup(f.Hash)
+}
+
+func (a *App) isMirroredGroup(hash string) bool {
+	var enabled int
+	if err := a.db.QueryRow(`SELECT enabled FROM mirror_groups WHERE hash = ?`, hash).Scan(&enabled); err != nil {
+		return false
+	}
+	return enabled == 1
 }
 
 func (a *App) stabilityMetrics(hash string) (int, float64) {
@@ -1245,6 +1270,35 @@ func (a *App) labelFlow(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+func (a *App) mirrorFlowGroup(w http.ResponseWriter, r *http.Request) {
+	flow, err := a.flowByID(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "flow not found"})
+		return
+	}
+	var in struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+	if flow.ServiceID == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "flow has no service"})
+		return
+	}
+	if in.Enabled {
+		_, err = a.db.Exec(`INSERT INTO mirror_groups(hash, service_id, enabled, created_at) VALUES (?, ?, 1, ?) ON CONFLICT(hash) DO UPDATE SET service_id=excluded.service_id, enabled=1`, flow.Hash, *flow.ServiceID, time.Now().UTC().Format(time.RFC3339))
+	} else {
+		_, err = a.db.Exec(`UPDATE mirror_groups SET enabled = 0 WHERE hash = ?`, flow.Hash)
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "hash": flow.Hash, "enabled": in.Enabled})
+}
+
 func (a *App) unbanFlow(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	_, err := a.db.Exec(`UPDATE flows SET banned = 0 WHERE id = ?`, id)
@@ -1426,14 +1480,16 @@ func (a *App) flowGroups(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) loadMirroring() {
-	row := a.db.QueryRow(`SELECT enabled, targets FROM mirroring WHERE id = 1`)
+	row := a.db.QueryRow(`SELECT enabled, targets, services FROM mirroring WHERE id = 1`)
 	var enabled int
 	var targets string
-	if err := row.Scan(&enabled, &targets); err != nil {
+	var services string
+	if err := row.Scan(&enabled, &targets, &services); err != nil {
 		return
 	}
-	cfg := MirroringConfig{Enabled: enabled == 1, Targets: []MirrorTarget{}}
+	cfg := MirroringConfig{Enabled: enabled == 1, Targets: []MirrorTarget{}, Services: []ServiceMirrorConfig{}}
 	_ = json.Unmarshal([]byte(targets), &cfg.Targets)
+	_ = json.Unmarshal([]byte(services), &cfg.Services)
 	a.mirrorMu.Lock()
 	a.mirroring = cfg
 	a.mirrorMu.Unlock()
@@ -1453,7 +1509,8 @@ func (a *App) setMirroring(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b, _ := json.Marshal(cfg.Targets)
-	_, err := a.db.Exec(`UPDATE mirroring SET enabled = ?, targets = ? WHERE id = 1`, boolInt(cfg.Enabled), string(b))
+	sb, _ := json.Marshal(cfg.Services)
+	_, err := a.db.Exec(`UPDATE mirroring SET enabled = ?, targets = ?, services = ? WHERE id = 1`, boolInt(cfg.Enabled), string(b), string(sb))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -1483,6 +1540,82 @@ func (a *App) forwardMirror(raw string) {
 			_, _ = conn.Write([]byte(raw + "\n"))
 		}(t)
 	}
+}
+
+func (a *App) startMirrorScheduler(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.runMirrorTick()
+		}
+	}
+}
+
+func (a *App) runMirrorTick() {
+	a.mirrorMu.RLock()
+	cfg := a.mirroring
+	a.mirrorMu.RUnlock()
+	if !cfg.Enabled {
+		return
+	}
+	now := time.Now()
+	for _, svc := range cfg.Services {
+		if !svc.Enabled || svc.ServiceID == 0 || len(svc.Targets) == 0 {
+			continue
+		}
+		interval := svc.IntervalSeconds
+		if interval < 1 {
+			interval = 60
+		}
+		if due, ok := a.mirrorDue[svc.ServiceID]; ok && now.Before(due) {
+			continue
+		}
+		a.mirrorDue[svc.ServiceID] = now.Add(time.Duration(interval) * time.Second)
+		go a.mirrorMarkedServiceGroups(svc)
+	}
+}
+
+func (a *App) mirrorMarkedServiceGroups(cfg ServiceMirrorConfig) {
+	rows, err := a.db.Query(`SELECT hash FROM mirror_groups WHERE service_id = ? AND enabled = 1`, cfg.ServiceID)
+	if err != nil {
+		log.Printf("mirror groups query error: %v", err)
+		return
+	}
+	hashes := []string{}
+	for rows.Next() {
+		var hash string
+		if rows.Scan(&hash) == nil {
+			hashes = append(hashes, hash)
+		}
+	}
+	_ = rows.Close()
+	for _, hash := range hashes {
+		row := a.db.QueryRow(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows WHERE hash = ? ORDER BY created_at DESC LIMIT 1`, hash)
+		flow, err := scanFlowRow(row)
+		if err != nil {
+			continue
+		}
+		a.enrichFlow(&flow)
+		payload, _ := json.Marshal(map[string]any{"type": "flagmate_mirror", "service_id": cfg.ServiceID, "hash": hash, "flow": flow})
+		for _, target := range cfg.Targets {
+			a.sendMirrorPayload(target, string(payload)+"\n")
+		}
+	}
+}
+
+func (a *App) sendMirrorPayload(target MirrorTarget, payload string) {
+	addr := net.JoinHostPort(target.IP, strconv.Itoa(target.Port))
+	conn, err := net.DialTimeout("tcp", addr, 700*time.Millisecond)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	_ = conn.SetWriteDeadline(time.Now().Add(700 * time.Millisecond))
+	_, _ = conn.Write([]byte(payload))
 }
 
 func scanFlow(rows *sql.Rows) (Flow, error) {

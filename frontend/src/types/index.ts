@@ -13,6 +13,7 @@ export interface Flow {
   destination: string
   checker: boolean
   banned: boolean
+  mirrored: boolean
   response_code: number
   flow_id: number
   src_ip: string
@@ -55,5 +56,13 @@ export interface FlowGroup {
 
 export interface MirroringConfig {
   enabled: boolean
+  targets: { ip: string; port: number }[]
+  services: ServiceMirrorConfig[]
+}
+
+export interface ServiceMirrorConfig {
+  service_id: number
+  enabled: boolean
+  interval_seconds: number
   targets: { ip: string; port: number }[]
 }

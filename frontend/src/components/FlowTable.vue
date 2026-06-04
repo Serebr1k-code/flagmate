@@ -96,6 +96,13 @@
               >
                 Unban
               </button>
+              <button
+                class="btn btn-sm"
+                :class="flow.mirrored ? 'btn-success' : 'btn-outline'"
+                @click="toggleMirror(flow)"
+              >
+                {{ flow.mirrored ? 'Mirrored' : 'Mirror' }}
+              </button>
             </td>
           </tr>
           <tr v-if="flows.length === 0">
@@ -271,6 +278,18 @@ async function unbanFlow(flow: Flow) {
     fetchFlows()
   } catch (e) {
     console.error('Failed to unban flow:', e)
+  }
+}
+
+async function toggleMirror(flow: Flow) {
+  try {
+    await api.post(`/flows/${flow.id}/mirror`, { enabled: !flow.mirrored })
+    const mirrored = !flow.mirrored
+    for (const f of flows.value) {
+      if (f.hash === flow.hash) f.mirrored = mirrored
+    }
+  } catch (e) {
+    console.error('Failed to toggle mirror:', e)
   }
 }
 
