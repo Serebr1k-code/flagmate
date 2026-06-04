@@ -3,3 +3,8 @@ dist/
 *.sock
 .env
 backend/server
+backend-data/
+suricata-logs/
+sockets/
+.playwright-mcp/
+*.png

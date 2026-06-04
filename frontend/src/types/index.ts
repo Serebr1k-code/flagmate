@@ -8,6 +8,9 @@ export interface Flow {
   raw_response: Record<string, any>
   hash: string
   stable: boolean
+  stability_pct: number
+  avg_interval: number
+  destination: string
   checker: boolean
   banned: boolean
   response_code: number
@@ -33,8 +36,12 @@ export interface Service {
 
 export interface Pattern {
   id: number
+  service_id: number | null
   pattern: string
   description: string
+  mode: string
+  active: boolean
+  match_count: number
   created_at: string
 }
 

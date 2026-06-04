@@ -38,6 +38,7 @@ import type { FlowGroup } from '@/types'
 
 const groups = ref<FlowGroup[]>([])
 const topN = ref(20)
+const emit = defineEmits<{ 'open-flow-id': [flowId: string] }>()
 
 async function fetchGroups() {
   try {
@@ -47,7 +48,7 @@ async function fetchGroups() {
 }
 
 function formatTime(ts: string) { return new Date(ts).toLocaleString() }
-function viewExampleFlow(flowId: string) { window.open(`/api/flows/${flowId}`, '_blank') }
+function viewExampleFlow(flowId: string) { emit('open-flow-id', flowId) }
 
 onMounted(fetchGroups)
 </script>

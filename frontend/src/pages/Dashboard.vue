@@ -2,7 +2,7 @@
   <div class="dashboard">
     <aside class="sidebar">
       <div class="sidebar-header">
-        <h2>FlagMate</h2>
+        <h2>Flagmate</h2>
         <ThemeSwitcher />
       </div>
 
@@ -10,7 +10,7 @@
         <button
           v-for="tab in tabs"
           :key="tab.id"
-          @click="activeTab = tab.id"
+          @click="switchTab(tab.id)"
           class="nav-item"
           :class="{ active: activeTab === tab.id }"
         >
@@ -25,17 +25,26 @@
       </div>
     </aside>
 
-    <main class="main-content">
-      <component :is="currentComponent" @open-flow="onOpenFlow" @open-word-picker="onOpenWordPicker" />
-    </main>
+    <main class="main-content" :class="{ 'detail-open': selectedFlow }">
+      <div class="content-pane" :class="{ compact: selectedFlow }">
+        <component
+          :is="currentComponent"
+          :selected-flow="selectedFlow"
+          @open-flow="onOpenFlow"
+          @open-flow-id="onOpenFlowId"
+          @open-word-picker="onOpenWordPicker"
+        />
+      </div>
 
-    <FlowDetail
-      v-if="selectedFlow"
-      :flow="selectedFlow"
-      @close="selectedFlow = null"
-      @checker-toggled="onCheckerToggled"
-      @ban-clicked="onBanClicked"
-    />
+      <FlowDetail
+        v-if="selectedFlow"
+        class="detail-pane"
+        :flow="selectedFlow"
+        @close="selectedFlow = null"
+        @checker-toggled="onCheckerToggled"
+        @ban-clicked="onBanClicked"
+      />
+    </main>
 
     <WordPicker
       v-if="showWordPicker"
@@ -48,14 +57,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import ThemeSwitcher from '@/components/ThemeSwitcher.vue'
 import FlowTable from '@/components/FlowTable.vue'
 import FlowGroups from '@/components/FlowGroups.vue'
 import ServiceManager from '@/components/ServiceManager.vue'
-import PatternManager from '@/components/PatternManager.vue'
 import BanPanel from '@/components/BanPanel.vue'
 import MirroringSettings from '@/components/MirroringSettings.vue'
 import FlowDetail from '@/components/FlowDetail.vue'
@@ -75,7 +83,6 @@ const tabs = [
   { id: 'flows', label: 'Flows', component: FlowTable },
   { id: 'groups', label: 'Groups', component: FlowGroups },
   { id: 'services', label: 'Services', component: ServiceManager },
-  { id: 'patterns', label: 'Patterns', component: PatternManager },
   { id: 'bans', label: 'Bans', component: BanPanel },
   { id: 'mirroring', label: 'Mirroring', component: MirroringSettings },
 ]
@@ -85,8 +92,30 @@ const currentComponent = computed(() => {
   return tab ? tab.component : null
 })
 
+function switchTab(tabId: string) {
+  activeTab.value = tabId
+  selectedFlow.value = null
+}
+
+function handleKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') {
+    if (selectedFlow.value) selectedFlow.value = null
+    if (showWordPicker.value) showWordPicker.value = false
+  }
+}
+
 function onOpenFlow(flow: Flow) {
   selectedFlow.value = flow
+}
+
+async function onOpenFlowId(flowId: string) {
+  try {
+    const { data } = await api.get(`/flows/${flowId}`)
+    selectedFlow.value = data
+    activeTab.value = 'flows'
+  } catch (e) {
+    console.error('Failed to fetch flow:', e)
+  }
 }
 
 async function onBanClicked(flow: Flow) {
@@ -117,7 +146,12 @@ async function onBanWords(words: string[]) {
   if (!wordPickerFlow.value) return
   for (const word of words) {
     try {
-      await api.post('/patterns', { pattern: word, description: `Auto-banned from flow ${wordPickerFlow.value?.id.substring(0, 8)}` })
+      await api.post('/patterns', {
+        service_id: wordPickerFlow.value.service_id,
+        pattern: word,
+        description: `Auto-banned from flow ${wordPickerFlow.value?.id.substring(0, 8)}`,
+        mode: 'B',
+      })
     } catch (e) {
       console.error(`Failed to ban word "${word}":`, e)
     }
@@ -137,6 +171,9 @@ function refreshCurrentComponent() {
   activeTab.value = ''
   setTimeout(() => { activeTab.value = key }, 0)
 }
+
+onMounted(() => window.addEventListener('keydown', handleKeydown))
+onUnmounted(() => window.removeEventListener('keydown', handleKeydown))
 </script>
 
 <style scoped>
@@ -150,5 +187,8 @@ function refreshCurrentComponent() {
 .nav-item.active { background-color: var(--surface-hover); color: var(--primary); font-weight: 600; }
 .sidebar-footer { padding-top: 16px; border-top: 1px solid var(--border); }
 .text-destructive { color: var(--destructive); }
-.main-content { flex: 1; padding: 24px; overflow-y: auto; background-color: var(--background); }
+.main-content { flex: 1; padding: 24px; overflow: hidden; background-color: var(--background); display: flex; gap: 18px; min-width: 0; }
+.content-pane { flex: 1 1 auto; min-width: 0; overflow-y: auto; transition: flex-basis 0.2s ease, max-width 0.2s ease; }
+.main-content.detail-open .content-pane { flex: 0 0 320px; max-width: 320px; }
+.detail-pane { flex: 1 1 auto; min-width: 0; overflow-y: auto; }
 </style>

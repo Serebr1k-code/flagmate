@@ -1,7 +1,5 @@
 <template>
-  <Teleport to="body">
-    <div class="dialog-overlay" @click.self="$emit('close')">
-      <div class="dialog">
+  <section class="flow-detail-panel" @scroll="onPanelScroll">
         <div class="dialog-header">
           <h2 class="dialog-title">Flow History</h2>
           <span class="mono text-sm hash-label">{{ flow.hash.substring(0, 16) }}...</span>
@@ -13,121 +11,85 @@
           </button>
         </div>
 
-        <div class="history-timeline">
-          <div
-            v-for="f in flowHistory"
-            :key="f.id"
-            class="history-item"
-            :class="{ active: selectedFlow.id === f.id }"
-            @click="selectFlow(f)"
-          >
-            <div class="history-item-time">{{ formatTime(f.created_at) }}</div>
-            <div class="history-item-info">
-              <span class="mono text-sm">{{ f.src_ip }}:{{ f.src_port }} → {{ f.dst_ip }}:{{ f.dst_port }}</span>
-            </div>
-            <div class="history-item-badges">
-              <span v-if="f.stable" class="badge badge-success">Stable</span>
-              <span v-if="f.checker" class="badge badge-primary">Checker</span>
-              <span v-if="f.banned" class="badge badge-destructive">Banned</span>
-              <span class="badge" :class="f.response_code === 200 ? 'badge-success' : 'badge-warning'">{{ f.response_code }}</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="divider"></div>
-
-        <div class="flow-detail-card card">
-          <div class="header-grid">
-            <div class="header-item">
+        <div class="flow-summary card">
+          <div class="summary-grid">
+            <div class="summary-item">
               <span class="label">Source</span>
-              <span>{{ selectedFlow.src_ip }}:{{ selectedFlow.src_port }}</span>
+              <span>{{ flow.src_ip }}:{{ flow.src_port }}</span>
             </div>
-            <div class="header-item">
+            <div class="summary-item">
               <span class="label">Destination</span>
-              <span>{{ selectedFlow.dst_ip }}:{{ selectedFlow.dst_port }}</span>
+              <span>{{ flow.destination || `${flow.dst_ip}:${flow.dst_port}` }}</span>
             </div>
-            <div class="header-item">
+            <div class="summary-item">
               <span class="label">Protocol</span>
-              <span class="badge badge-outline">{{ selectedFlow.proto }}</span>
+              <span class="badge badge-outline">{{ flow.proto }}</span>
             </div>
-            <div class="header-item">
-              <span class="label">Flow ID</span>
-              <span class="mono">{{ selectedFlow.flow_id }}</span>
-            </div>
-            <div class="header-item">
-              <span class="label">Direction</span>
-              <span>{{ selectedFlow.direction }}</span>
-            </div>
-            <div class="header-item">
-              <span class="label">Response Code</span>
-              <span class="badge" :class="selectedFlow.response_code === 200 ? 'badge-success' : 'badge-warning'">{{ selectedFlow.response_code }}</span>
-            </div>
-            <div class="header-item">
-              <span class="label">Start</span>
-              <span>{{ selectedFlow.start_ts ? formatTime(selectedFlow.start_ts) : 'N/A' }}</span>
-            </div>
-            <div class="header-item">
-              <span class="label">End</span>
-              <span>{{ selectedFlow.end_ts ? formatTime(selectedFlow.end_ts) : 'N/A' }}</span>
-            </div>
-            <div class="header-item">
-              <span class="label">Packets</span>
-              <span>{{ selectedFlow.pkt_count }}</span>
-            </div>
-            <div class="header-item">
-              <span class="label">Bytes In</span>
-              <span>{{ formatBytes(selectedFlow.bytes_in) }}</span>
-            </div>
-            <div class="header-item">
-              <span class="label">Bytes Out</span>
-              <span>{{ formatBytes(selectedFlow.bytes_out) }}</span>
+            <div class="summary-item">
+              <span class="label">Flows</span>
+              <span>{{ flowHistory.length }}{{ hasMore ? '+' : '' }}</span>
             </div>
           </div>
-
-          <div class="header-actions">
+          <div class="summary-actions">
             <button
               class="btn btn-sm"
-              :class="selectedFlow.checker ? 'btn-success' : 'btn-secondary'"
+              :class="flow.checker ? 'btn-success' : 'btn-secondary'"
               @click="toggleChecker"
             >
-              {{ selectedFlow.checker ? '✓ Checker' : '☐ Not Checker' }}
+              {{ flow.checker ? 'Checker' : 'Not Checker' }}
+            </button>
+            <span class="badge" :class="flow.stability_pct >= 70 ? 'badge-success' : 'badge-warning'">{{ stabilityLabel(flow) }}</span>
+            <span v-if="flow.banned" class="badge badge-destructive">Banned</span>
+            <button
+              v-if="!flow.banned"
+              class="btn btn-sm btn-destructive"
+              @click="banFlow"
+            >
+              Ban Words
+            </button>
+            <button
+              v-if="flow.banned"
+              class="btn btn-sm btn-outline"
+              @click="unbanFlow"
+            >
+              Unban Flow
             </button>
           </div>
         </div>
 
-        <div class="divider"></div>
-
-        <div class="tabs">
-          <button
-            v-for="tab in ['request', 'response']"
-            :key="tab"
-            @click="activeTab = tab"
-            class="tab"
-            :class="{ active: activeTab === tab }"
+        <div v-if="loading" class="empty-state">Loading flow history...</div>
+        <div v-else class="transcript">
+          <div
+            v-for="(block, idx) in transcriptBlocks"
+            :key="idx"
+            class="transcript-block"
+            :class="[block.isIncoming ? 'block-incoming' : 'block-outgoing', { banned: block.banned, checker: block.checker, 'negative-response': !block.isIncoming && block.response_code !== null && !isPositiveResponse(block.response_code) }]"
           >
-            {{ tab.charAt(0).toUpperCase() + tab.slice(1) }}
-          </button>
-        </div>
-
-        <div class="content-area">
-          <div v-if="activeTab === 'request'" class="code-block">
-            {{ formatJSON(selectedFlow.raw_request) }}
+            <div class="block-header">
+              <span class="block-time">{{ formatTime(block.created_at) }}</span>
+              <span v-if="block.response_code" class="badge" :class="isPositiveResponse(block.response_code) ? 'badge-success' : 'badge-warning'">{{ block.response_code }}</span>
+              <span v-if="block.banned" class="badge badge-destructive">Banned</span>
+              <span v-if="block.checker" class="badge badge-primary">Checker</span>
+            </div>
+            <pre class="block-payload">{{ formatPayload(block) }}</pre>
           </div>
-          <div v-else class="code-block">
-            {{ formatJSON(selectedFlow.raw_response) }}
+          <div v-if="transcriptBlocks.length === 0" class="empty-state">
+            No payload data captured
           </div>
+          <div v-if="loadingMore" class="empty-state">Loading more...</div>
+          <div v-else-if="!hasMore && flowHistory.length > 0" class="end-state">End of loaded history</div>
         </div>
 
         <div class="dialog-footer">
           <button
-            v-if="selectedFlow.response_code === 200 && !selectedFlow.banned"
+            v-if="!flow.banned"
             class="btn btn-destructive"
             @click="banFlow"
           >
             Ban Words
           </button>
           <button
-            v-if="selectedFlow.banned"
+            v-if="flow.banned"
             class="btn btn-outline"
             @click="unbanFlow"
           >
@@ -135,39 +97,131 @@
           </button>
           <button class="btn btn-outline" @click="$emit('close')">Close</button>
         </div>
+  </section>
+
+  <Teleport to="body">
+    <div v-if="showUnbanConfirm" class="confirm-overlay" @click.self="showUnbanConfirm = false">
+      <div class="confirm-dialog">
+        <h2>Unban this flow?</h2>
+        <p class="text-muted">These service ban rules match this flow and will be deleted:</p>
+        <div class="confirm-list">
+          <span v-for="pattern in matchingPatterns" :key="pattern.id" class="confirm-chip">
+            {{ pattern.pattern }}
+          </span>
+        </div>
+        <div class="confirm-actions">
+          <button class="btn btn-outline" @click="showUnbanConfirm = false">Cancel</button>
+          <button class="btn btn-destructive" @click="confirmUnbanFlow">Delete rules and unban</button>
+        </div>
       </div>
     </div>
   </Teleport>
 </template>
 
 <script setup lang="ts">
-import { ref, defineProps, defineEmits, onMounted } from 'vue'
+import { ref, computed, defineProps, defineEmits, onMounted, watch } from 'vue'
 import api from '@/utils/api'
-import type { Flow } from '@/types'
+import type { Flow, Pattern } from '@/types'
 
 const props = defineProps<{ flow: Flow }>()
 const emit = defineEmits<{ close: []; checkerToggled: [flow: Flow]; banClicked: [flow: Flow] }>()
 
 const flowHistory = ref<Flow[]>([])
-const selectedFlow = ref<Flow>(props.flow)
-const activeTab = ref('request')
+const loading = ref(true)
+const loadingMore = ref(false)
+const hasMore = ref(true)
+const pageSize = 100
+const showUnbanConfirm = ref(false)
+const matchingPatterns = ref<Pattern[]>([])
 
-onMounted(async () => {
-  try {
-    const { data } = await api.get('/flows/history', { params: { hash: props.flow.hash } })
-    flowHistory.value = data
-    if (flowHistory.value.length > 0) {
-      selectedFlow.value = flowHistory.value[0]
+const transcriptBlocks = computed(() => {
+  const blocks: Array<{
+    isIncoming: boolean
+    created_at: string
+    response_code: number | null
+    banned: boolean
+    checker: boolean
+    raw_request: Record<string, any> | null
+    raw_response: Record<string, any> | null
+  }> = []
+
+  for (const f of flowHistory.value) {
+    const hasReq = !!f.raw_request && Object.keys(f.raw_request).length > 0
+    const hasResp = !!f.raw_response && Object.keys(f.raw_response).length > 0
+
+    if (hasReq) {
+      blocks.push({
+        isIncoming: true,
+        created_at: f.created_at,
+        response_code: null,
+        banned: f.banned,
+        checker: f.checker,
+        raw_request: f.raw_request,
+        raw_response: null,
+      })
     }
-  } catch (e) {
-    console.error('Failed to fetch flow history:', e)
-    flowHistory.value = [props.flow]
+    if (hasResp) {
+      blocks.push({
+        isIncoming: false,
+        created_at: f.created_at,
+        response_code: f.response_code,
+        banned: f.banned,
+        checker: f.checker,
+        raw_request: null,
+        raw_response: f.raw_response,
+      })
+    }
+
+    if (!hasReq && !hasResp) {
+      blocks.push({
+        isIncoming: false,
+        created_at: f.created_at,
+        response_code: f.response_code,
+        banned: f.banned,
+        checker: f.checker,
+        raw_request: { info: `No payload captured for flow ${f.id}`, direction: f.direction },
+        raw_response: null,
+      })
+    }
   }
+
+  return blocks
 })
 
-function selectFlow(f: Flow) {
-  selectedFlow.value = f
-  activeTab.value = 'request'
+async function fetchFlowHistory(reset = true) {
+  if (reset) {
+    loading.value = true
+    flowHistory.value = []
+    hasMore.value = true
+  } else if (loadingMore.value || !hasMore.value) {
+    return
+  } else {
+    loadingMore.value = true
+  }
+  try {
+    const { data } = await api.get('/flows/history', {
+      params: { hash: props.flow.hash, limit: pageSize, offset: reset ? 0 : flowHistory.value.length }
+    })
+    const rows = Array.isArray(data) ? data : []
+    flowHistory.value = reset ? (rows.length > 0 ? rows : [props.flow]) : [...flowHistory.value, ...rows]
+    hasMore.value = rows.length === pageSize
+  } catch (e) {
+    console.error('Failed to fetch flow history:', e)
+    if (reset) flowHistory.value = [props.flow]
+  } finally {
+    loading.value = false
+    loadingMore.value = false
+  }
+}
+
+onMounted(() => fetchFlowHistory(true))
+watch(() => props.flow.id, () => fetchFlowHistory(true))
+
+function onPanelScroll(event: Event) {
+  const el = event.currentTarget as HTMLElement
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 320) {
+    fetchFlowHistory(false)
+  }
 }
 
 function formatTime(ts: string | null) {
@@ -175,77 +229,88 @@ function formatTime(ts: string | null) {
   return new Date(ts).toLocaleString()
 }
 
-function formatBytes(bytes: number) {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+function stabilityLabel(flow: Flow) {
+  const pct = Math.round(flow.stability_pct || 0)
+  const avg = Number(flow.avg_interval || 0)
+  return `${pct}%/${avg > 0 ? avg.toFixed(1) : '—'}s`
 }
 
-function formatJSON(obj: Record<string, any>): string {
-  try { return JSON.stringify(obj, null, 2) } catch { return String(obj) }
+function isPositiveResponse(code: number) {
+  return code === 101 || (code >= 200 && code < 400)
+}
+
+function formatPayload(block: typeof transcriptBlocks.value[0]): string {
+  const raw = block.raw_request || block.raw_response
+  if (!raw) return '(empty)'
+  try { return JSON.stringify(raw, null, 2) } catch { return String(raw) }
 }
 
 async function toggleChecker() {
   try {
-    await api.post(`/flows/${selectedFlow.value.id}/label`, { checker: !selectedFlow.value.checker })
-    selectedFlow.value.checker = !selectedFlow.value.checker
-    const idx = flowHistory.value.findIndex(f => f.id === selectedFlow.value.id)
-    if (idx !== -1) {
-      flowHistory.value[idx] = { ...selectedFlow.value }
-    }
-    emit('checkerToggled', selectedFlow.value)
+    await api.post(`/flows/${props.flow.id}/label`, { checker: !props.flow.checker })
+    props.flow.checker = !props.flow.checker
+    emit('checkerToggled', props.flow)
   } catch (e) { console.error('Failed to toggle checker:', e) }
 }
 
 async function banFlow() {
-  emit('banClicked', selectedFlow.value)
+  emit('banClicked', props.flow)
 }
 
 async function unbanFlow() {
   try {
-    await api.post(`/flows/${selectedFlow.value.id}/unban`)
-    selectedFlow.value.banned = false
-    const idx = flowHistory.value.findIndex(f => f.id === selectedFlow.value.id)
-    if (idx !== -1) {
-      flowHistory.value[idx] = { ...selectedFlow.value }
+    const { data } = await api.get(`/flows/${props.flow.id}/matching-patterns`)
+    matchingPatterns.value = Array.isArray(data) ? data : []
+    if (matchingPatterns.value.length > 0) {
+      showUnbanConfirm.value = true
+      return
     }
+    await api.post(`/flows/${props.flow.id}/unban`)
+    props.flow.banned = false
   } catch (e) { console.error('Failed to unban flow:', e) }
+}
+
+async function confirmUnbanFlow() {
+  try {
+    await api.post(`/flows/${props.flow.id}/remove-matching-patterns`)
+    props.flow.banned = false
+    matchingPatterns.value = []
+    showUnbanConfirm.value = false
+  } catch (e) { console.error('Failed to remove matching patterns:', e) }
 }
 </script>
 
 <style scoped>
-.dialog-overlay { position: fixed; inset: 0; background-color: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 1000; display: flex; align-items: center; justify-content: center; }
-.dialog { background-color: var(--card); color: var(--card-foreground); border: 1px solid var(--border); border-radius: 12px; padding: 24px; max-width: 900px; width: 95%; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.4); }
-.dialog-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.flow-detail-panel { background-color: var(--card); color: var(--card-foreground); border: 1px solid var(--border); border-radius: 12px; padding: 20px; height: calc(100vh - 48px); overflow-y: auto; box-shadow: 0 18px 48px rgba(0,0,0,0.28); }
+.dialog-header { display: flex; align-items: center; justify-content: space-between; margin: -20px -20px 16px; padding: 16px 20px; position: sticky; top: -20px; z-index: 5; background-color: var(--card); border-bottom: 1px solid var(--border); }
 .dialog-title { font-size: 20px; font-weight: 600; margin: 0; }
 .hash-label { font-size: 13px; color: var(--text-muted); margin: 0 12px; }
 .dialog-close { background: none; border: none; cursor: pointer; padding: 4px; border-radius: 4px; color: var(--muted-foreground); transition: all 0.15s; }
 .dialog-close:hover { filter: brightness(1.2); }
-.history-timeline { display: flex; flex-direction: column; gap: 4px; margin-bottom: 16px; max-height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 8px; background-color: var(--surface); }
-.history-item { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
-.history-item:hover { background-color: var(--surface-hover); }
-.history-item.active { background-color: var(--primary); color: var(--primary-foreground); }
-.history-item.active .badge { background-color: rgba(255,255,255,0.2); border-color: transparent; }
-.history-item.active .text-sm { color: var(--primary-foreground); }
-.history-item-time { font-size: 12px; color: var(--text-muted); min-width: 140px; }
-.history-item.active .history-item-time { color: var(--primary-foreground); opacity: 0.8; }
-.history-item-info { flex: 1; }
-.history-item-badges { display: flex; gap: 4px; flex-wrap: wrap; }
-.flow-detail-card { border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; background-color: var(--surface); }
-.header-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 12px; }
-.header-item { display: flex; flex-direction: column; gap: 2px; }
-.header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.divider { height: 1px; background-color: var(--border); margin: 16px 0; }
-.tabs { display: flex; gap: 2px; padding: 4px; border-radius: 8px; margin-bottom: 12px; background-color: var(--muted); }
-.tab { padding: 6px 16px; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; border: none; background: transparent; color: var(--muted-foreground); transition: all 0.15s; }
-.tab:hover { filter: brightness(1.1); }
-.tab.active { background-color: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
-.content-area { margin-bottom: 16px; }
-.code-block { background-color: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; line-height: 1.5; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 400px; overflow-y: auto; }
-.dialog-footer { display: flex; justify-content: flex-end; gap: 8px; }
+.flow-summary { border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin: 0 0 16px; background-color: var(--surface); position: sticky; top: 50px; z-index: 4; }
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.summary-item { display: flex; flex-direction: column; gap: 2px; }
+.summary-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.transcript { margin-bottom: 16px; display: flex; flex-direction: column; gap: 10px; }
+.transcript-block { margin: 10px 0; border-radius: 6px; overflow: visible; display: block; width: 100%; box-sizing: border-box; }
+.block-incoming { border: 2px solid #ef4444; background: #1a0a0a; }
+.block-outgoing { border: 2px solid #22c55e; background: #0a1a0a; }
+.block-outgoing.negative-response { border-color: #f59e0b; background: rgba(245, 158, 11, 0.16); }
+.block-header { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: rgba(255,255,255,0.08); flex-wrap: wrap; border-bottom: 1px solid rgba(255,255,255,0.1); }
+.block-time { font-size: 13px; color: #ccc; margin-right: auto; font-weight: 600; }
+.block-payload { padding: 14px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; line-height: 1.6; overflow: visible; white-space: pre-wrap; word-break: break-word; display: block; min-height: 50px; color: #eee; width: 100%; box-sizing: border-box; }
+.code-block { background-color: var(--surface); color: var(--text); }
+.empty-state { text-align: center; padding: 32px; color: var(--text-muted); }
+.end-state { text-align: center; padding: 12px; color: var(--text-muted); font-size: 12px; }
+.dialog-footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border); }
 .label { font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
 .mono { font-family: 'JetBrains Mono', monospace; }
 .text-sm { font-size: 12px; }
+.text-muted { color: var(--text-muted); }
+.confirm-overlay { position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.65); backdrop-filter: blur(4px); }
+.confirm-dialog { width: min(560px, 94vw); background: var(--card); color: var(--card-foreground); border: 1px solid var(--border); border-radius: 12px; padding: 22px; box-shadow: 0 20px 60px rgba(0,0,0,0.45); }
+.confirm-dialog h2 { margin: 0 0 8px; font-size: 20px; }
+.confirm-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; max-height: 260px; overflow-y: auto; }
+.confirm-chip { padding: 6px 10px; border-radius: 6px; border: 1px solid var(--destructive); background: rgba(239, 68, 68, 0.16); color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
 </style>

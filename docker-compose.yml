@@ -1,84 +1,43 @@
 services:
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_USER: ctf
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flagmate_pass}
-      POSTGRES_DB: ctf
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ctf"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      flagmate:
-        ipv4_address: 172.28.0.2
-
-  redis:
-    image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
-    volumes:
-      - redisdata:/data
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      flagmate:
-        ipv4_address: 172.28.0.3
-
-  nats:
-    image: nats:2-alpine
-    command: ["-js", "-m", "8222"]
-    ports:
-      - "4222:4222"
-      - "8222:8222"
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "http://localhost:8222/healthz"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      flagmate:
-        ipv4_address: 172.28.0.4
-
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      nats:
-        condition: service_healthy
     environment:
-      POSTGRES_DSN: postgres://ctf:${POSTGRES_PASSWORD:-flagmate_pass}@172.28.0.2:5432/ctf?sslmode=disable
-      REDIS_URL: redis://172.28.0.3:6379/0
-      NATS_URL: nats://172.28.0.4:4222
       UI_PASSWORD: ${UI_PASSWORD:-admin}
       JWT_SECRET: ${JWT_SECRET:-supersecretjwtkey}
       STABLE_THRESHOLD: ${STABLE_THRESHOLD:-5}
-      EVE_SOCKET: ${EVE_SOCKET:-/var/log/suricata/eve.json}
-      SURICATA_RULES_PATH: /etc/suricata/rules/ctf.rules
+      EVE_SOCKET: ${EVE_SOCKET:-/var/run/suricata/eve.sock}
+      DB_PATH: ${DB_PATH:-/data/flagmate.db}
+      AUTO_HOOK_SURICATA: ${AUTO_HOOK_SURICATA:-true}
+      SURICATA_YAML_PATH: ${SURICATA_YAML_PATH:-/etc/suricata/suricata.yaml}
       SURICATA_PID: ${SURICATA_PID:-0}
+      GATE_ENABLED: ${GATE_ENABLED:-true}
+      GATE_LISTEN: ${GATE_LISTEN:-:18080}
+      GATE_UPSTREAM: ${GATE_UPSTREAM:-http://testservice:18080}
+      POISON_IMAGE_DIR: ${POISON_IMAGE_DIR:-/app/poison-images}
     volumes:
-      - /home/Serebr1k/flagmate/suricata-logs:/var/log/suricata:ro
-      - ./rules:/etc/suricata/rules
+      - ./backend-data:/data
+      - ./sockets:/var/run/suricata
+      - ./suricata.yaml:/etc/suricata/suricata.yaml
+      - ./assets/femboy:/app/poison-images:ro
     ports:
       - "8080:8080"
+      - "18080:18080"
     restart: unless-stopped
     networks:
       flagmate:
-        ipv4_address: 172.28.0.5
+        ipv4_address: 172.28.0.2
+
+  testservice:
+    image: python:3.11-alpine
+    command: ["python", "/app/test_service.py"]
+    volumes:
+      - ./test_service.py:/app/test_service.py:ro
+    restart: unless-stopped
+    networks:
+      flagmate:
+        ipv4_address: 172.28.0.4
 
   frontend:
     build:
@@ -91,11 +50,7 @@ services:
     restart: unless-stopped
     networks:
       flagmate:
-        ipv4_address: 172.28.0.6
-
-volumes:
-  pgdata:
-  redisdata:
+        ipv4_address: 172.28.0.3
 
 networks:
   flagmate:

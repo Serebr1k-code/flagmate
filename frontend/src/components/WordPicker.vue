@@ -14,7 +14,7 @@
 
         <div v-if="flow" class="flow-info-card">
           <span class="label">Flow:</span>
-          <span class="mono">{{ flow.src_ip }}:{{ flow.src_port }} → {{ flow.dst_ip }}:{{ flow.dst_port }}</span>
+          <span class="mono">{{ flow.src_ip }}:{{ flow.src_port }} -> {{ flow.destination || `${flow.dst_ip}:${flow.dst_port}` }}</span>
         </div>
 
         <div class="custom-input-row">
@@ -27,11 +27,26 @@
           <button class="btn btn-sm btn-outline" @click="addCustomWord">Add</button>
         </div>
 
+        <div v-if="pathWords.length > 0" class="words-section path-section">
+          <h3>Endpoint / path parts</h3>
+          <div class="word-chips">
+            <span
+              v-for="word in pathWords"
+              :key="word"
+              class="word-chip path-chip"
+              :class="{ selected: selectedWords.has(word) }"
+              @click="toggleWord(word)"
+            >
+              {{ word }}
+            </span>
+          </div>
+        </div>
+
         <div class="words-section">
           <h3>Unique words (not in checker flows)</h3>
           <div class="word-chips">
             <span
-              v-for="word in uniqueWords"
+              v-for="word in nonPathWords"
               :key="word"
               class="word-chip"
               :class="{ selected: selectedWords.has(word) }"
@@ -70,7 +85,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, defineProps, defineEmits } from 'vue'
+import { ref, computed, defineProps, defineEmits } from 'vue'
 import type { Flow } from '@/types'
 
 const props = defineProps<{ flow: Flow | null; uniqueWords: string[] }>()
@@ -78,6 +93,27 @@ const emit = defineEmits<{ close: []; banWords: [words: string[]] }>()
 
 const selectedWords = ref(new Set<string>())
 const customWord = ref('')
+
+const pathWords = computed(() => {
+  const uri = String(props.flow?.raw_request?.uri || props.flow?.raw_request?.url || '')
+  if (!uri) return []
+  const clean = uri.split('?')[0].trim()
+  const parts = clean.split('/').filter(Boolean)
+  const candidates: string[] = []
+  if (clean.startsWith('/')) candidates.push(clean)
+  if (clean) candidates.push(clean.replace(/^\//, ''))
+  for (let i = 0; i < parts.length; i++) {
+    const prefix = '/' + parts.slice(0, i + 1).join('/')
+    candidates.push(prefix)
+    candidates.push(parts[i])
+  }
+  return Array.from(new Set(candidates.filter(Boolean)))
+})
+
+const nonPathWords = computed(() => {
+  const pathSet = new Set(pathWords.value)
+  return props.uniqueWords.filter(word => !pathSet.has(word))
+})
 
 function toggleWord(word: string) {
   if (selectedWords.value.has(word)) {
@@ -117,6 +153,8 @@ function banWords() {
 .word-chip { padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid var(--border); background-color: var(--surface); color: var(--text); transition: all 0.15s; user-select: none; }
 .word-chip:hover { filter: brightness(1.1); }
 .word-chip.selected { background-color: var(--destructive); color: var(--destructive-foreground); border-color: var(--destructive); }
+.path-chip { background-color: rgba(59, 130, 246, 0.16); border-color: rgba(59, 130, 246, 0.65); color: #93c5fd; font-weight: 600; }
+.path-chip.selected { background-color: #2563eb; border-color: #60a5fa; color: #fff; }
 .empty-state { padding: 16px; text-align: center; color: var(--text-muted); font-size: 14px; }
 .dialog-footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border); }
 .mono { font-family: 'JetBrains Mono', monospace; }

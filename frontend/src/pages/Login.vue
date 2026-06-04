@@ -2,7 +2,7 @@
   <div class="login-page">
     <div class="login-card">
       <div class="login-header">
-        <h1>FlagMate</h1>
+        <h1>Flagmate</h1>
         <p class="text-muted">CTF Attack-Defence Suricata UI</p>
       </div>
 

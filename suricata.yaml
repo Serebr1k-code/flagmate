@@ -1,29 +1,52 @@
-%YAML 1.1
----
+app-layer:
+    protocols:
+        http:
+            detection-ports:
+                dp: 80, 443, 8080, 18080, 3000
+            enabled: "yes"
 default-log-dir: /var/log/suricata
-
-outputs:
-  - eve-log:
-      enabled: yes
-      filetype: regular
-      filename: /var/log/suricata/eve.json
-      types:
-        - flow
-        - http
-        - alert
-        - dns
-        - tls
-        - stats
-
 default-rule-path: /etc/suricata/rules
-
-rule-files:
-  - ctf.rules
-
-runmode: workers
-
 logging:
-  outputs:
-    - console:
-        enabled: yes
-        level: Info
+    outputs:
+        - console:
+            enabled: "yes"
+            level: Info
+outputs:
+    - eve-log:
+        enabled: "yes"
+        filename: eve.json
+        filetype: regular
+        types:
+            - flow
+            - http:
+                custom:
+                    - hostname
+                    - url
+                    - http_user_agent
+                    - http_content_type
+                    - http_method
+                    - http_content_length
+                    - status
+                    - http_referer
+                    - protocol
+                    - length
+                extended: "yes"
+            - alert
+            - dns
+            - tls
+            - stats
+    - eve-log:
+        enabled: "yes"
+        filename: /var/run/suricata/eve.sock
+        filetype: unix_stream
+        types:
+            - http
+rule-files:
+    - ctf.rules
+runmode: workers
+stream:
+    checksum-validation: false
+    inline: "no"
+    midstream: true
+    reassembly:
+        depth: 1mb

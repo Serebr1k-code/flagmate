@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "FlagMate API",
+    "title": "Flagmate API",
     "description": "CTF Attack-Defence Suricata UI - REST API for traffic analysis, flow management, and ban flagging",
     "version": "1.0.0"
   },
