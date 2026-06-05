@@ -326,6 +326,16 @@ function highlightPayload(text: string, marks: MarkHit[]): string {
       ranges.push({ start: match.index, end: match.index + token.length, color: '#a855f7' })
     }
   }
+  if (showHistory.value && flowHistory.value.length > 1) {
+    const volatileLineValues = [/(Date:\s*)([^\n]+)/g, /(Sec-Websocket-Key:\s*)([^\n]+)/gi, /(Sec-Websocket-Accept:\s*)([^\n]+)/gi]
+    for (const re of volatileLineValues) {
+      for (const match of text.matchAll(re)) {
+        if (match.index === undefined || !match[2]) continue
+        const start = match.index + match[1].length
+        ranges.push({ start, end: start + match[2].length, color: '#a855f7' })
+      }
+    }
+  }
   if (!ranges.length) return escapeHTML(text)
   ranges.sort((a, b) => a.start - b.start || b.end - a.end)
   const merged: typeof ranges = []
@@ -350,14 +360,14 @@ const variableTokens = computed(() => {
   const freq = new Map<string, number>()
   for (const flow of flowHistory.value) {
     const text = `${formatRequestPayload(flow.raw_request, flow.marks || [])}\n${formatResponsePayload(flow.raw_response, flow.response_code, flow.marks || [])}`
-    const tokens = new Set((text.match(/[A-Za-z0-9_+\-=./]{4,80}/g) || []).filter(isDiffToken))
+    const tokens = new Set((text.match(/[A-Za-z0-9_+\-=./:]{4,80}/g) || []).filter(isDiffToken))
     for (const token of tokens) freq.set(token, (freq.get(token) || 0) + 1)
   }
   return new Set(Array.from(freq.entries()).filter(([, count]) => count > 0 && count < flowHistory.value.length).map(([token]) => token))
 })
 
 function isDiffToken(token: string) {
-  return /\d/.test(token) || token.length >= 12 || /[+=/_-]/.test(token)
+  return /\d/.test(token) || token.length >= 12 || /[+=/_:-]/.test(token)
 }
 
 function escapeHTML(value: string) {
