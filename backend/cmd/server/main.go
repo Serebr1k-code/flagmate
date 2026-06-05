@@ -2162,7 +2162,12 @@ func (a *App) mirrorMarkedServiceGroups(cfg ServiceMirrorConfig, targets []Mirro
 		payload, _ := json.Marshal(map[string]any{"type": "flagmate_mirror", "service_id": cfg.ServiceID, "hash": hash, "flow": flow})
 		for _, target := range targets {
 			target.Port = servicePort
-			success, flag, response := a.sendMirrorPayload(target, string(payload)+"\n")
+			success, flag, response := false, "", ""
+			if isWebSocketFlow(flow) {
+				success, flag, response = a.sendWebSocketMirror(target, flow)
+			} else {
+				success, flag, response = a.sendMirrorPayload(target, string(payload)+"\n")
+			}
 			a.recordMirrorAttempt(cfg.ServiceID, hash, flow.ID, target, success, flag, response)
 		}
 	}
@@ -2196,6 +2201,87 @@ func (a *App) sendMirrorPayload(target MirrorTarget, payload string) (bool, stri
 	}
 	flag := extractFlag(response)
 	return flag != "", flag, response
+}
+
+func isWebSocketFlow(flow Flow) bool {
+	if flow.ResponseCode == http.StatusSwitchingProtocols {
+		return true
+	}
+	if headers, ok := flow.RawRequest["headers"].(map[string]any); ok {
+		return strings.EqualFold(asString(headers["Upgrade"]), "websocket")
+	}
+	return false
+}
+
+func (a *App) sendWebSocketMirror(target MirrorTarget, flow Flow) (bool, string, string) {
+	addr := net.JoinHostPort(target.IP, strconv.Itoa(target.Port))
+	conn, err := net.DialTimeout("tcp", addr, 1200*time.Millisecond)
+	if err != nil {
+		return false, "", err.Error()
+	}
+	defer conn.Close()
+	uri := asString(flow.RawRequest["uri"])
+	if uri == "" {
+		uri = "/"
+	}
+	if q := asString(flow.RawRequest["query"]); q != "" {
+		uri += "?" + q
+	}
+	keySeed := sha256.Sum256([]byte(fmt.Sprintf("%d:%s:%s", time.Now().UnixNano(), target.IP, flow.ID)))
+	key := base64.StdEncoding.EncodeToString(keySeed[:16])
+	req := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nUser-Agent: Flagmate-Mirror\r\n\r\n", uri, addr, key)
+	_ = conn.SetDeadline(time.Now().Add(2500 * time.Millisecond))
+	if _, err := conn.Write([]byte(req)); err != nil {
+		return false, "", err.Error()
+	}
+	br := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil {
+		return false, "", err.Error()
+	}
+	var transcript strings.Builder
+	transcript.WriteString(resp.Status + "\n")
+	for k, vals := range resp.Header {
+		transcript.WriteString(k + ": " + strings.Join(vals, ", ") + "\n")
+	}
+	clientFrames := strings.Split(strings.TrimSpace(asString(flow.RawRequest["body"])), "\n")
+	for _, frame := range clientFrames {
+		frame = strings.TrimSpace(frame)
+		if frame == "" {
+			continue
+		}
+		if _, err := conn.Write(maskedWebSocketTextFrame(frame)); err != nil {
+			return false, "", transcript.String() + err.Error()
+		}
+	}
+	buf := make([]byte, 8192)
+	_ = conn.SetReadDeadline(time.Now().Add(1200 * time.Millisecond))
+	n, _ := br.Read(buf)
+	if n > 0 {
+		frames := decodeWebSocketTextFrames(buf[:n], false)
+		for _, frame := range frames {
+			transcript.WriteString(frame + "\n")
+		}
+	}
+	response := transcript.String()
+	flag := extractFlag(response)
+	return flag != "", flag, response
+}
+
+func maskedWebSocketTextFrame(text string) []byte {
+	payload := []byte(text)
+	mask := [4]byte{0x13, 0x37, 0xc0, 0xde}
+	out := []byte{0x81}
+	if len(payload) < 126 {
+		out = append(out, byte(0x80|len(payload)))
+	} else {
+		out = append(out, 0x80|126, byte(len(payload)>>8), byte(len(payload)))
+	}
+	out = append(out, mask[:]...)
+	for i, b := range payload {
+		out = append(out, b^mask[i%4])
+	}
+	return out
 }
 
 func (a *App) recordMirrorAttempt(serviceID int, hash, flowID string, target MirrorTarget, success bool, flag, response string) {
