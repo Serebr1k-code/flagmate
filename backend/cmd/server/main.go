@@ -1592,10 +1592,51 @@ func (a *App) listPatterns(w http.ResponseWriter, r *http.Request) {
 				p.ServiceID = intPtr(int(sid.Int64))
 			}
 			p.Active = active == 1
+			p.MatchCount = a.patternMatchCount(p)
 			out = append(out, p)
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *App) patternMatchCount(pattern Pattern) int {
+	query := `SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows`
+	args := []any{}
+	if pattern.ServiceID != nil {
+		query += ` WHERE service_id = ?`
+		args = append(args, *pattern.ServiceID)
+	}
+	query += ` ORDER BY created_at DESC LIMIT 20000`
+	rows, err := a.db.Query(query, args...)
+	if err != nil {
+		return pattern.MatchCount
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		flow, err := scanFlow(rows)
+		if err != nil {
+			continue
+		}
+		a.hydrateFlowPayloads(&flow)
+		if singlePatternMatches(pattern, flow) {
+			count++
+		}
+	}
+	return count
+}
+
+func singlePatternMatches(pattern Pattern, flow Flow) bool {
+	reqText := strings.ToLower(flowMatchText(flow.RawRequest, 0))
+	respText := strings.ToLower(flowMatchText(flow.RawResponse, flow.ResponseCode) + " " + strconv.Itoa(flow.ResponseCode))
+	target := reqText + " " + respText
+	switch strings.ToUpper(pattern.Mode) {
+	case "C":
+		target = reqText
+	case "S":
+		target = respText
+	}
+	return patternMatch(strings.ToLower(pattern.Pattern), target)
 }
 
 func (a *App) createPattern(w http.ResponseWriter, r *http.Request) {
