@@ -311,7 +311,7 @@ function highlightPayload(text: string, marks: MarkHit[]): string {
   const ranges: Array<{ start: number; end: number; color: string }> = []
   for (const mark of marks) {
     try {
-      const re = new RegExp(mark.regex, 'gi')
+      const re = compileMarkRegex(mark.regex)
       for (const match of text.matchAll(re)) {
         if (match.index === undefined || !match[0]) continue
         ranges.push({ start: match.index, end: match.index + match[0].length, color: mark.color })
@@ -348,11 +348,22 @@ function highlightPayload(text: string, marks: MarkHit[]): string {
   let cursor = 0
   for (const r of merged) {
     out += escapeHTML(text.slice(cursor, r.start))
-    out += `<mark style="background:${escapeAttr(r.color)}55;border-bottom:1px solid ${escapeAttr(r.color)};color:inherit;padding:0 2px;border-radius:3px">${escapeHTML(text.slice(r.start, r.end))}</mark>`
+    const isDiff = r.color.toLowerCase() === '#a855f7'
+    out += `<mark style="background:${escapeAttr(r.color)}${isDiff ? '22' : '55'};border-bottom:${isDiff ? '2px dashed' : '1px solid'} ${escapeAttr(r.color)};color:inherit;padding:0 2px;border-radius:3px">${escapeHTML(text.slice(r.start, r.end))}</mark>`
     cursor = r.end
   }
   out += escapeHTML(text.slice(cursor))
   return out
+}
+
+function compileMarkRegex(regex: string) {
+  let source = regex
+  let flags = 'g'
+  if (source.startsWith('(?i)')) {
+    source = source.slice(4)
+    flags += 'i'
+  }
+  return new RegExp(source, flags)
 }
 
 const variableTokens = computed(() => {

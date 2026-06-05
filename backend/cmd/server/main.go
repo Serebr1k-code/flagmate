@@ -1172,9 +1172,69 @@ func (a *App) hydratePayloadMap(src map[string]any) map[string]any {
 }
 
 func flowHash(req, resp map[string]any, serviceID int) string {
-	base := fmt.Sprintf("%d|%s|%s|%v", serviceID, asString(req["method"]), asString(req["uri"]), resp["status"])
+	base := fmt.Sprintf("%d|%s|%s|%s|%v", serviceID, asString(req["method"]), asString(req["uri"]), requestShape(req), resp["status"])
 	h := sha256.Sum256([]byte(base))
 	return hex.EncodeToString(h[:])
+}
+
+func requestShape(req map[string]any) string {
+	parts := []string{}
+	query := asString(req["query"])
+	if query != "" {
+		vals, _ := url.ParseQuery(query)
+		keys := make([]string, 0, len(vals))
+		for key := range vals {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		parts = append(parts, "q="+strings.Join(keys, ","))
+	}
+	body := asString(req["body"])
+	if strings.TrimSpace(body) != "" {
+		parts = append(parts, "b="+bodyShape(body))
+	}
+	return strings.Join(parts, "|")
+}
+
+func bodyShape(body string) string {
+	trimmed := strings.TrimSpace(body)
+	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+		var v any
+		if json.Unmarshal([]byte(trimmed), &v) == nil {
+			keys := []string{}
+			collectJSONKeys(v, "", &keys)
+			sort.Strings(keys)
+			return "json:" + strings.Join(keys, ",")
+		}
+	}
+	vals, err := url.ParseQuery(trimmed)
+	if err == nil && len(vals) > 0 {
+		keys := make([]string, 0, len(vals))
+		for key := range vals {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		return "form:" + strings.Join(keys, ",")
+	}
+	return "raw:" + strconv.Itoa(len(trimmed))
+}
+
+func collectJSONKeys(v any, prefix string, out *[]string) {
+	switch t := v.(type) {
+	case map[string]any:
+		for key, val := range t {
+			path := key
+			if prefix != "" {
+				path = prefix + "." + key
+			}
+			*out = append(*out, path)
+			collectJSONKeys(val, path, out)
+		}
+	case []any:
+		if len(t) > 0 {
+			collectJSONKeys(t[0], prefix+"[]", out)
+		}
+	}
 }
 
 func (a *App) enrichFlow(f *Flow) {
