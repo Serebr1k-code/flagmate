@@ -1,7 +1,7 @@
 <template>
   <section class="flow-detail-panel" @scroll="onPanelScroll">
         <div class="dialog-header">
-          <h2 class="dialog-title">Flow History</h2>
+          <h2 class="dialog-title">Flow Detail</h2>
           <span class="mono text-sm hash-label">{{ flow.hash.substring(0, 16) }}...</span>
           <button class="dialog-close" @click="$emit('close')">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -27,7 +27,7 @@
             </div>
             <div class="summary-item">
               <span class="label">Flows</span>
-              <span>{{ flowHistory.length }}{{ hasMore ? '+' : '' }}</span>
+              <span>{{ flow.group_count || flowHistory.length }}{{ showHistory && hasMore ? '+' : '' }}</span>
             </div>
           </div>
           <div class="summary-actions">
@@ -40,6 +40,13 @@
             </button>
             <span class="badge" :class="flow.stability_pct >= 70 ? 'badge-success' : 'badge-warning'">{{ stabilityLabel(flow) }}</span>
             <span v-if="flow.banned" class="badge badge-destructive">Banned</span>
+            <button
+              v-if="(flow.group_count || 0) > 1"
+              class="btn btn-sm btn-outline"
+              @click="toggleHistory"
+            >
+              {{ showHistory ? 'Hide History' : `Show History (${flow.group_count})` }}
+            </button>
             <button
               v-if="!flow.banned"
               class="btn btn-sm btn-destructive"
@@ -152,12 +159,20 @@ const flowHistory = ref<Flow[]>([])
 const loading = ref(true)
 const loadingMore = ref(false)
 const hasMore = ref(true)
+const showHistory = ref(false)
 const pageSize = 100
 const showUnbanConfirm = ref(false)
 const showCheckerConfirm = ref(false)
 const matchingPatterns = ref<Pattern[]>([])
 
 async function fetchFlowHistory(reset = true) {
+  if (!showHistory.value) {
+    flowHistory.value = [props.flow]
+    hasMore.value = false
+    loading.value = false
+    loadingMore.value = false
+    return
+  }
   if (reset) {
     loading.value = true
     flowHistory.value = []
@@ -183,11 +198,20 @@ async function fetchFlowHistory(reset = true) {
   }
 }
 
+function toggleHistory() {
+  showHistory.value = !showHistory.value
+  fetchFlowHistory(true)
+}
+
 onMounted(() => fetchFlowHistory(true))
-watch(() => props.flow.id, () => fetchFlowHistory(true))
+watch(() => props.flow.id, () => {
+  showHistory.value = false
+  fetchFlowHistory(true)
+})
 
 function onPanelScroll(event: Event) {
   const el = event.currentTarget as HTMLElement
+  if (!showHistory.value) return
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 320) {
     fetchFlowHistory(false)
   }
