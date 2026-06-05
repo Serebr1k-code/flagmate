@@ -491,6 +491,11 @@ func (a *App) startHTTPGate(ctx context.Context) {
 }
 
 func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream *url.URL) {
+	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		a.handleGateWebSocket(w, r, upstream)
+		return
+	}
+
 	target := *upstream
 	target.Path = r.URL.Path
 	target.RawPath = r.URL.RawPath
@@ -558,6 +563,59 @@ func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream
 	_, _ = w.Write(bodyToSend)
 
 	a.storeInlineFlow(r, reqMeta, respMeta, banned)
+}
+
+func (a *App) handleGateWebSocket(w http.ResponseWriter, r *http.Request, upstream *url.URL) {
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "websocket unsupported", http.StatusInternalServerError)
+		return
+	}
+	upstreamAddr := upstream.Host
+	if !strings.Contains(upstreamAddr, ":") {
+		upstreamAddr = net.JoinHostPort(upstreamAddr, "80")
+	}
+	upConn, err := net.DialTimeout("tcp", upstreamAddr, 3*time.Second)
+	if err != nil {
+		http.Error(w, "upstream unavailable", http.StatusBadGateway)
+		return
+	}
+	defer func() { _ = upConn.Close() }()
+
+	target := *upstream
+	target.Path = r.URL.Path
+	target.RawQuery = r.URL.RawQuery
+	proxyReq := r.Clone(r.Context())
+	proxyReq.URL = &target
+	proxyReq.RequestURI = ""
+	proxyReq.Host = upstream.Host
+	if err := proxyReq.Write(upConn); err != nil {
+		http.Error(w, "websocket upstream write failed", http.StatusBadGateway)
+		return
+	}
+	br := bufio.NewReader(upConn)
+	resp, err := http.ReadResponse(br, proxyReq)
+	if err != nil {
+		http.Error(w, "websocket upstream handshake failed", http.StatusBadGateway)
+		return
+	}
+
+	clientConn, rw, err := hj.Hijack()
+	if err != nil {
+		return
+	}
+	defer func() { _ = clientConn.Close() }()
+	_ = resp.Write(rw)
+	_ = rw.Flush()
+
+	reqMeta := map[string]any{"method": r.Method, "uri": r.URL.Path, "query": r.URL.RawQuery, "headers": r.Header, "body": ""}
+	respMeta := map[string]any{"status": resp.StatusCode, "headers": resp.Header, "body": "websocket upgrade"}
+	a.storeInlineFlow(r, reqMeta, respMeta, false)
+
+	done := make(chan struct{}, 2)
+	go func() { _, _ = io.Copy(upConn, rw); done <- struct{}{} }()
+	go func() { _, _ = io.Copy(clientConn, br); done <- struct{}{} }()
+	<-done
 }
 
 func (a *App) storeInlineFlow(r *http.Request, reqMeta, respMeta map[string]any, banned bool) {

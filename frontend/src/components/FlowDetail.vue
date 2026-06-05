@@ -269,7 +269,7 @@ function formatRequestPayload(raw: Record<string, any>): string {
   const uri = stringValue(raw.uri || raw.url || '/')
   const query = stringValue(raw.query || '')
   const headers = normalizeHeaders(raw.headers)
-  const body = stringValue(raw.body || '')
+  const body = formatBodyForDisplay(raw.body || '', headers)
   const lines: string[] = []
   lines.push(`${method} ${uri}${query ? `?${query}` : ''} HTTP`)
   for (const [key, value] of Object.entries(headers)) lines.push(`${key}: ${value}`)
@@ -290,7 +290,7 @@ function formatRequestPayload(raw: Record<string, any>): string {
 function formatResponsePayload(raw: Record<string, any>, responseCode: number | null): string {
   const status = Number(raw.status || responseCode || 0)
   const headers = normalizeHeaders(raw.headers)
-  const body = stringValue(raw.body || '')
+  const body = formatBodyForDisplay(raw.body || '', headers)
   const lines: string[] = []
   if (status) lines.push(`HTTP ${status}`)
   for (const [key, value] of Object.entries(headers)) lines.push(`${key}: ${value}`)
@@ -315,8 +315,52 @@ function normalizeHeaders(raw: any): Record<string, string> {
   return out
 }
 
+function formatBodyForDisplay(raw: any, headers: Record<string, string>): string {
+  const body = stringValue(raw)
+  if (!body) return ''
+  const json = tryFormatJSON(body)
+  if (json) return json
+  const contentType = Object.entries(headers).find(([key]) => key.toLowerCase() === 'content-type')?.[1] || ''
+  if (isLongHTML(body, contentType)) return extractUsefulHTMLText(body)
+  return body
+}
+
+function tryFormatJSON(body: string): string | null {
+  const trimmed = body.trim()
+  if (!trimmed || !['{', '['].includes(trimmed[0])) return null
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2)
+  } catch {
+    return null
+  }
+}
+
+function isLongHTML(body: string, contentType: string): boolean {
+  return body.length > 1200 && (contentType.toLowerCase().includes('html') || /<html|<body|<script|<div/i.test(body))
+}
+
+function extractUsefulHTMLText(body: string): string {
+  const withoutScripts = body
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+  const text = withoutScripts
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const vars = Array.from(withoutScripts.matchAll(/(?:value|content|data-[\w-]+)=["']([^"']{4,160})["']/gi)).map(match => match[1])
+  const parts = [text.slice(0, 1800), ...vars.map(value => `var: ${value}`)]
+  return parts.filter(Boolean).join('\n')
+}
+
 function stringValue(value: any): string {
   if (value === null || value === undefined) return ''
+  if (typeof value === 'object') return JSON.stringify(value)
   return String(value)
 }
 

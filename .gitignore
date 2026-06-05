@@ -16,3 +16,5 @@ sockets/
 *.sqlite-*
 *.pcap
 flow-detail-*.png
+__pycache__/
+*.pyc
