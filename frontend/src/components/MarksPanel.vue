@@ -16,16 +16,21 @@
     </div>
 
     <div class="marks-list">
-      <div v-for="mark in marks" :key="mark.id" class="mark-card">
+      <div v-for="mark in marks" :key="mark.id" class="mark-card" :class="{ disabled: !mark.active }">
         <span class="color-dot" :style="{ backgroundColor: mark.color }"></span>
         <div class="mark-main">
-          <b>{{ mark.name || mark.regex }}</b>
+          <div class="mark-title">
+            <b>{{ mark.name || mark.regex }}</b>
+            <span class="count-chip">flows: {{ mark.flows || 0 }}</span>
+            <span class="count-chip">groups: {{ mark.groups || 0 }}</span>
+          </div>
           <code>{{ mark.regex }}</code>
         </div>
-        <button class="btn btn-sm" :class="mark.banned ? 'btn-outline' : 'btn-destructive'" @click="toggleBan(mark)">
+        <button class="btn btn-sm btn-outline" @click="toggleEnabled(mark)">{{ mark.active ? 'Disable' : 'Enable' }}</button>
+        <button class="btn btn-sm mark-danger" @click="toggleBan(mark)">
           {{ mark.banned ? 'Unban' : 'Ban' }}
         </button>
-        <button class="btn btn-sm btn-destructive" @click="deleteMark(mark.id)">Delete</button>
+        <button class="btn btn-sm mark-danger" @click="deleteMark(mark.id)">Delete</button>
       </div>
       <div v-if="marks.length === 0" class="empty-state">No marks yet</div>
     </div>
@@ -63,6 +68,11 @@ async function toggleBan(mark: Mark) {
   await fetchMarks()
 }
 
+async function toggleEnabled(mark: Mark) {
+  await api.post(`/marks/${mark.id}/toggle`, { active: !mark.active })
+  await fetchMarks()
+}
+
 async function loadDefaults() {
   await api.post('/marks/defaults')
   await fetchMarks()
@@ -94,9 +104,14 @@ onUnmounted(stopRefresh)
 .color-input { padding: 4px; }
 .marks-list { display: flex; flex-direction: column; gap: 10px; }
 .mark-card { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+.mark-card.disabled { opacity: 0.55; }
 .color-dot { width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--border); flex: 0 0 auto; }
 .mark-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.mark-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .mark-main code { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.count-chip { padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); font-size: 11px; font-weight: 600; }
+.mark-danger { border: 1px solid var(--destructive); color: var(--destructive); background: transparent; }
+.mark-danger:hover { background: var(--destructive); color: var(--destructive-foreground); }
 .text-muted { color: var(--text-muted); }
 .empty-state { padding: 24px; text-align: center; color: var(--text-muted); }
 </style>
