@@ -17,18 +17,16 @@
 
     <div class="marks-list">
       <div
-        v-for="mark in marks"
+        v-for="(mark, index) in marks"
         :key="mark.id"
         class="mark-card"
-        :class="{ disabled: !mark.active, dragging: draggingId === mark.id, 'drop-target': dragOverId === mark.id && draggingId !== mark.id }"
+        :class="{ disabled: !mark.active, dragging: draggingId === mark.id, 'insert-before': insertIndex === index && draggingId !== mark.id, 'insert-after': insertIndex === index + 1 && draggingId !== mark.id }"
         draggable="true"
         @dragstart="onDragStart($event, mark.id)"
-        @dragover.prevent="dragOverId = mark.id"
-        @dragleave="dragOverId = null"
-        @drop.prevent="onDrop(mark.id)"
+        @dragover.prevent="onDragOver($event, index)"
+        @drop.prevent="onDrop"
         @dragend="clearDrag"
       >
-        <span class="drag-handle">⋮⋮</span>
         <span class="color-dot" :style="{ backgroundColor: mark.color }"></span>
         <div class="mark-main">
           <div class="mark-title">
@@ -57,7 +55,7 @@ import type { Mark } from '@/types'
 const marks = ref<Mark[]>([])
 const draft = ref({ name: '', regex: '', color: '#ef4444' })
 const draggingId = ref<number | null>(null)
-const dragOverId = ref<number | null>(null)
+const insertIndex = ref<number | null>(null)
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 async function fetchMarks() {
@@ -89,18 +87,34 @@ async function toggleEnabled(mark: Mark) {
 }
 
 function onDragStart(event: DragEvent, id: number) {
+  const target = event.target as HTMLElement | null
+  if (target?.closest('button,input,select,textarea,a')) {
+    event.preventDefault()
+    return
+  }
   event.dataTransfer?.setData('text/plain', String(id))
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
   draggingId.value = id
 }
 
-async function onDrop(targetId: number) {
-  if (!draggingId.value || draggingId.value === targetId) return clearDrag()
+function onDragOver(event: DragEvent, index: number) {
+  if (draggingId.value === null) return
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  const el = event.currentTarget as HTMLElement
+  const midpoint = el.getBoundingClientRect().top + el.offsetHeight / 2
+  insertIndex.value = event.clientY < midpoint ? index : index + 1
+}
+
+async function onDrop() {
+  if (draggingId.value === null || insertIndex.value === null) return clearDrag()
   const from = marks.value.findIndex(mark => mark.id === draggingId.value)
-  const to = marks.value.findIndex(mark => mark.id === targetId)
-  if (from < 0 || to < 0) return clearDrag()
+  if (from < 0) return clearDrag()
   const next = [...marks.value]
   const [moved] = next.splice(from, 1)
+  let to = insertIndex.value
+  if (from < to) to--
+  to = Math.max(0, Math.min(next.length, to))
+  if (from === to) return clearDrag()
   next.splice(to, 0, moved)
   marks.value = next
   clearDrag()
@@ -110,7 +124,7 @@ async function onDrop(targetId: number) {
 
 function clearDrag() {
   draggingId.value = null
-  dragOverId.value = null
+  insertIndex.value = null
 }
 
 async function loadDefaults() {
@@ -143,13 +157,14 @@ onUnmounted(stopRefresh)
 .regex-input { font-family: 'JetBrains Mono', monospace; }
 .color-input { padding: 4px; }
 .marks-list { display: flex; flex-direction: column; gap: 10px; }
-.mark-card { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease, opacity .12s ease; }
+.mark-card { position: relative; display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); cursor: grab; transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease, opacity .12s ease; }
 .mark-card:hover { border-color: color-mix(in srgb, var(--primary) 55%, var(--border)); }
-.mark-card.dragging { opacity: 0.55; transform: scale(0.985); box-shadow: 0 10px 30px rgba(0,0,0,0.28); }
-.mark-card.drop-target { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+.mark-card.dragging { opacity: 0.42; transform: scale(0.985); box-shadow: 0 10px 30px rgba(0,0,0,0.28); cursor: grabbing; }
+.mark-card.insert-before::before, .mark-card.insert-after::after { content: ''; position: absolute; left: 10px; right: 10px; height: 3px; border-radius: 999px; background: #22c55e; box-shadow: 0 0 12px rgba(34,197,94,.7); }
+.mark-card.insert-before::before { top: -7px; }
+.mark-card.insert-after::after { bottom: -7px; }
 .mark-card.disabled { opacity: 0.55; }
-.drag-handle { color: var(--text-muted); cursor: grab; user-select: none; font-weight: 700; letter-spacing: -3px; padding-right: 2px; }
-.mark-card.dragging .drag-handle { cursor: grabbing; }
+.mark-card button, .mark-card input, .mark-card select, .mark-card textarea { cursor: default; }
 .color-dot { width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--border); flex: 0 0 auto; }
 .mark-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .mark-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

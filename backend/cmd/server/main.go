@@ -1162,7 +1162,27 @@ func flowMatchText(raw map[string]any, status int) string {
 }
 
 func renderedDetailText(raw map[string]any, status int) string {
-	lines := []string{httpLikeText(raw, status), "---"}
+	lines := []string{}
+	if method := asString(raw["method"]); method != "" {
+		uri := asString(raw["uri"])
+		if query := asString(raw["query"]); query != "" && !strings.Contains(uri, "?") {
+			uri += "?" + query
+		}
+		lines = append(lines, fmt.Sprintf("%s %s HTTP", method, uri))
+	} else if status > 0 {
+		lines = append(lines, fmt.Sprintf("HTTP %d", status))
+	}
+	if headers, ok := raw["headers"].(map[string]any); ok {
+		keys := make([]string, 0, len(headers))
+		for key := range headers {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			lines = append(lines, fmt.Sprintf("%s: %s", key, headerValueString(headers[key])))
+		}
+	}
+	lines = append(lines, "---")
 	method := asString(raw["method"])
 	if method != "" {
 		lines = append(lines, "method: "+method)
