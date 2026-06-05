@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -608,14 +610,91 @@ func (a *App) handleGateWebSocket(w http.ResponseWriter, r *http.Request, upstre
 	_ = resp.Write(rw)
 	_ = rw.Flush()
 
-	reqMeta := map[string]any{"method": r.Method, "uri": r.URL.Path, "query": r.URL.RawQuery, "headers": r.Header, "body": ""}
-	respMeta := map[string]any{"status": resp.StatusCode, "headers": resp.Header, "body": "websocket upgrade"}
-	a.storeInlineFlow(r, reqMeta, respMeta, false)
-
+	clientCapture := &captureWriter{dst: upConn, limit: 32768}
+	serverCapture := &captureWriter{dst: clientConn, limit: 32768}
 	done := make(chan struct{}, 2)
-	go func() { _, _ = io.Copy(upConn, rw); done <- struct{}{} }()
-	go func() { _, _ = io.Copy(clientConn, br); done <- struct{}{} }()
+	go func() { _, _ = io.Copy(clientCapture, rw); done <- struct{}{} }()
+	go func() { _, _ = io.Copy(serverCapture, br); done <- struct{}{} }()
 	<-done
+	_ = upConn.Close()
+	_ = clientConn.Close()
+
+	reqMeta := map[string]any{"method": r.Method, "uri": r.URL.Path, "query": r.URL.RawQuery, "headers": r.Header, "body": strings.Join(decodeWebSocketTextFrames(clientCapture.bytes(), true), "\n")}
+	serverFrames := decodeWebSocketTextFrames(serverCapture.bytes(), false)
+	respMeta := map[string]any{"status": resp.StatusCode, "headers": resp.Header, "body": strings.Join(append([]string{"websocket upgrade"}, serverFrames...), "\n")}
+	a.storeInlineFlow(r, reqMeta, respMeta, false)
+}
+
+type captureWriter struct {
+	dst   io.Writer
+	limit int
+	buf   bytes.Buffer
+}
+
+func (w *captureWriter) Write(p []byte) (int, error) {
+	if w.buf.Len() < w.limit {
+		remaining := w.limit - w.buf.Len()
+		if len(p) > remaining {
+			_, _ = w.buf.Write(p[:remaining])
+		} else {
+			_, _ = w.buf.Write(p)
+		}
+	}
+	return w.dst.Write(p)
+}
+
+func (w *captureWriter) bytes() []byte { return w.buf.Bytes() }
+
+func decodeWebSocketTextFrames(raw []byte, masked bool) []string {
+	out := []string{}
+	for i := 0; i+2 <= len(raw); {
+		b0, b1 := raw[i], raw[i+1]
+		i += 2
+		opcode := b0 & 0x0f
+		length := int(b1 & 0x7f)
+		if length == 126 {
+			if i+2 > len(raw) {
+				break
+			}
+			length = int(binary.BigEndian.Uint16(raw[i : i+2]))
+			i += 2
+		} else if length == 127 {
+			if i+8 > len(raw) {
+				break
+			}
+			length64 := binary.BigEndian.Uint64(raw[i : i+8])
+			if length64 > 1<<20 {
+				break
+			}
+			length = int(length64)
+			i += 8
+		}
+		mask := []byte(nil)
+		frameMasked := b1&0x80 != 0
+		if frameMasked {
+			if i+4 > len(raw) {
+				break
+			}
+			mask = raw[i : i+4]
+			i += 4
+		} else if masked {
+			break
+		}
+		if i+length > len(raw) {
+			break
+		}
+		payload := append([]byte(nil), raw[i:i+length]...)
+		i += length
+		if mask != nil {
+			for j := range payload {
+				payload[j] ^= mask[j%4]
+			}
+		}
+		if opcode == 0x1 && len(payload) > 0 {
+			out = append(out, string(payload))
+		}
+	}
+	return out
 }
 
 func (a *App) storeInlineFlow(r *http.Request, reqMeta, respMeta map[string]any, banned bool) {
