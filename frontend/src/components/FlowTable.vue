@@ -67,6 +67,7 @@
                 <span v-if="flow.group_count > 1" class="badge badge-outline">{{ flow.group_count }}x</span>
                 <span v-if="flow.checker" class="badge badge-primary">Checker</span>
                 <span v-if="flow.banned" class="badge badge-destructive">Banned</span>
+                <span v-for="mark in flow.marks || []" :key="mark.id" class="badge mark-badge" :style="markStyle(mark.color)">{{ mark.name || mark.regex }}</span>
               </td>
               <td v-if="!selectedFlow">
                 <span class="badge" :class="isPositiveResponse(flow.response_code) ? 'badge-success' : 'badge-warning'">{{ flow.response_code }}</span>
@@ -98,7 +99,10 @@
                 <td v-if="!selectedFlow" class="text-muted">{{ formatTime(item.created_at) }}</td>
                 <td>{{ displayDirection(item) }}</td>
                 <td v-if="!selectedFlow"><span class="badge badge-outline">{{ item.proto }}</span></td>
-                <td v-if="!selectedFlow"><span class="badge" :class="item.stability_pct >= 70 ? 'badge-success' : 'badge-warning'">{{ stabilityLabel(item) }}</span></td>
+                <td v-if="!selectedFlow">
+                  <span class="badge" :class="item.stability_pct >= 70 ? 'badge-success' : 'badge-warning'">{{ stabilityLabel(item) }}</span>
+                  <span v-for="mark in item.marks || []" :key="mark.id" class="badge mark-badge" :style="markStyle(mark.color)">{{ mark.name || mark.regex }}</span>
+                </td>
                 <td v-if="!selectedFlow"><span class="badge" :class="isPositiveResponse(item.response_code) ? 'badge-success' : 'badge-warning'">{{ item.response_code }}</span></td>
                 <td v-if="!selectedFlow" class="flow-actions-cell" @click.stop>
                   <div class="flow-actions">
@@ -331,6 +335,10 @@ function isPositiveResponse(code: number) {
   return code === 101 || (code >= 200 && code < 400)
 }
 
+function markStyle(color: string) {
+  return { borderColor: color, backgroundColor: `${color}33`, color }
+}
+
 function displayDirection(flow: Flow) {
   const uri = String(flow.raw_request?.uri || flow.raw_request?.url || '')
   if (uri) return `${flow.dst_port}${uri.startsWith('/') ? uri : `/${uri}`}`
@@ -458,6 +466,7 @@ onUnmounted(disconnectLiveSocket)
 .flow-actions-cell { min-width: 170px; }
 .flow-actions { display: flex; align-items: center; gap: 10px; }
 .table td .badge + .badge { margin-left: 4px; }
+.mark-badge { border: 1px solid; }
 .mirror-btn { min-width: 76px; justify-content: center; }
 .flow-row:hover td { filter: brightness(1.05); }
 .load-state { text-align: center; color: var(--text-muted); font-size: 12px; padding: 6px; }

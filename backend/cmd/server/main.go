@@ -73,6 +73,20 @@ type Pattern struct {
 	CreatedAt   string `json:"created_at"`
 }
 
+type Mark struct {
+	ID    int    `json:"id"`
+	Name  string `json:"name"`
+	Regex string `json:"regex"`
+	Color string `json:"color"`
+}
+
+type MarkHit struct {
+	ID    int    `json:"id"`
+	Name  string `json:"name"`
+	Regex string `json:"regex"`
+	Color string `json:"color"`
+}
+
 type Flow struct {
 	ID           string         `json:"id"`
 	ServiceID    *int           `json:"service_id"`
@@ -91,6 +105,7 @@ type Flow struct {
 	Mirrored     bool           `json:"mirrored"`
 	GroupName    string         `json:"group_name"`
 	GroupCount   int            `json:"group_count"`
+	Marks        []MarkHit      `json:"marks"`
 	ResponseCode int            `json:"response_code"`
 	FlowID       int64          `json:"flow_id"`
 	SrcIP        string         `json:"src_ip"`
@@ -234,6 +249,11 @@ func main() {
 		pr.Delete("/patterns/{id}", app.deletePattern)
 		pr.Post("/patterns/{id}/toggle", app.togglePattern)
 
+		pr.Get("/marks", app.listMarks)
+		pr.Post("/marks", app.createMark)
+		pr.Post("/marks/defaults", app.loadDefaultMarks)
+		pr.Delete("/marks/{id}", app.deleteMark)
+
 		pr.Get("/flows", app.listFlows)
 		pr.Get("/flows/history", app.flowHistory)
 		pr.Get("/flows/{id}", app.getFlow)
@@ -310,6 +330,7 @@ func initSchema(db *sql.DB) error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS services (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, port INTEGER NOT NULL UNIQUE, protocol TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
 		`CREATE TABLE IF NOT EXISTS patterns (id INTEGER PRIMARY KEY AUTOINCREMENT, service_id INTEGER NULL, pattern TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', mode TEXT NOT NULL DEFAULT 'B', active INTEGER NOT NULL DEFAULT 1, match_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
+		`CREATE TABLE IF NOT EXISTS marks (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '', regex TEXT NOT NULL UNIQUE, color TEXT NOT NULL DEFAULT '#ef4444');`,
 		`CREATE TABLE IF NOT EXISTS flows (id TEXT PRIMARY KEY, service_id INTEGER NULL, direction TEXT NOT NULL, start_ts TEXT NULL, end_ts TEXT NULL, raw_request TEXT NOT NULL, raw_response TEXT NOT NULL, hash TEXT NOT NULL, stable INTEGER NOT NULL DEFAULT 0, checker INTEGER NOT NULL DEFAULT 0, banned INTEGER NOT NULL DEFAULT 0, response_code INTEGER NOT NULL DEFAULT 0, flow_id INTEGER NOT NULL DEFAULT 0, src_ip TEXT NOT NULL, dst_ip TEXT NOT NULL, src_port INTEGER NOT NULL, dst_port INTEGER NOT NULL, proto TEXT NOT NULL, pkt_count INTEGER NOT NULL DEFAULT 0, bytes_in INTEGER NOT NULL DEFAULT 0, bytes_out INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
 		`CREATE TABLE IF NOT EXISTS flow_payloads (hash TEXT PRIMARY KEY, payload TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
 		`CREATE INDEX IF NOT EXISTS idx_flows_created_at ON flows(created_at DESC);`,
@@ -1164,6 +1185,42 @@ func (a *App) enrichFlow(f *Flow) {
 	f.Mirrored = a.isMirroredGroup(f.Hash)
 	f.GroupName = a.groupName(f.Hash)
 	_ = a.db.QueryRow(`SELECT COUNT(*) FROM flows WHERE hash = ?`, f.Hash).Scan(&f.GroupCount)
+	f.Marks = a.matchingMarks(*f)
+}
+
+func (a *App) matchingMarks(f Flow) []MarkHit {
+	marks := a.allMarks()
+	if len(marks) == 0 {
+		return []MarkHit{}
+	}
+	src := strings.Join([]string{jsonString(f.RawRequest), jsonString(f.RawResponse), asString(f.RawRequest["body"]), asString(f.RawResponse["body"])}, "\n")
+	out := []MarkHit{}
+	for _, mark := range marks {
+		re, err := regexp.Compile(mark.Regex)
+		if err != nil {
+			continue
+		}
+		if re.MatchString(src) {
+			out = append(out, MarkHit{ID: mark.ID, Name: mark.Name, Regex: mark.Regex, Color: mark.Color})
+		}
+	}
+	return out
+}
+
+func (a *App) allMarks() []Mark {
+	rows, err := a.db.Query(`SELECT id,name,regex,color FROM marks ORDER BY id ASC`)
+	if err != nil {
+		return []Mark{}
+	}
+	defer rows.Close()
+	out := []Mark{}
+	for rows.Next() {
+		var m Mark
+		if rows.Scan(&m.ID, &m.Name, &m.Regex, &m.Color) == nil {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 func (a *App) groupName(hash string) string {
@@ -1398,6 +1455,64 @@ func (a *App) togglePattern(w http.ResponseWriter, r *http.Request) {
 	}
 	a.recalculateAllFlowBans()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (a *App) listMarks(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, a.allMarks())
+}
+
+func (a *App) createMark(w http.ResponseWriter, r *http.Request) {
+	var in Mark
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+	in.Regex = strings.TrimSpace(in.Regex)
+	if in.Regex == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "regex required"})
+		return
+	}
+	if _, err := regexp.Compile(in.Regex); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(in.Color) == "" {
+		in.Color = "#ef4444"
+	}
+	_, err := a.db.Exec(`INSERT INTO marks(name,regex,color) VALUES (?,?,?) ON CONFLICT(regex) DO UPDATE SET name=excluded.name,color=excluded.color`, strings.TrimSpace(in.Name), in.Regex, in.Color)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"status": "ok"})
+}
+
+func (a *App) deleteMark(w http.ResponseWriter, r *http.Request) {
+	_, err := a.db.Exec(`DELETE FROM marks WHERE id = ?`, chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (a *App) loadDefaultMarks(w http.ResponseWriter, _ *http.Request) {
+	defaults := []Mark{
+		{Name: "flag", Regex: `(?i)(?:[a-z0-9_]+\{[A-Za-z0-9_+\-=]{8,128}\}|\b[A-Za-z0-9_+\-=]{32}\b)`, Color: "#ef4444"},
+		{Name: "sql injection", Regex: `(?i)(?:\bunion\s+select\b|\bor\s+1\s*=\s*1\b|\bsleep\s*\(\s*\d+\s*\)|\binformation_schema\b|(?:--|#|/\*)\s*$)`, Color: "#f97316"},
+		{Name: "command injection", Regex: `(?i)(?:;|\|\||&&|\$\(|` + "`" + `)\s*(?:cat|curl|wget|bash|sh|nc|python|perl|php|id|whoami)\b`, Color: "#dc2626"},
+		{Name: "path traversal", Regex: `(?i)(?:\.\./){2,}|(?:%2e%2e%2f){2,}|/etc/(?:passwd|shadow|hosts)`, Color: "#fb7185"},
+		{Name: "ssrf", Regex: `(?i)(?:http://|https://)(?:127\.0\.0\.1|localhost|0\.0\.0\.0|169\.254\.169\.254|10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.)`, Color: "#06b6d4"},
+		{Name: "xss", Regex: `(?i)<\s*(?:script|img|svg|iframe|object)\b|javascript\s*:|onerror\s*=|onload\s*=`, Color: "#a855f7"},
+		{Name: "deserialization", Regex: `(?i)(?:\bO:\d+:"|\bacED\x00\x05|rO0AB|__reduce__|pickle|ysoserial)`, Color: "#8b5cf6"},
+		{Name: "template injection", Regex: `(?i)(?:\{\{\s*[^}]*\}\}|\$\{\s*[^}]*\}|<%=?\s*[^%]*%>)`, Color: "#eab308"},
+		{Name: "file upload shell", Regex: `(?i)(?:filename=\"?[^\";]*(?:\.php|\.phtml|\.jsp|\.aspx|\.sh)\b|Content-Type:\s*(?:application/x-php|text/x-php))`, Color: "#ec4899"},
+		{Name: "webshell", Regex: `(?i)(?:cmd=|exec=|system\s*\(|passthru\s*\(|shell_exec\s*\(|eval\s*\(|assert\s*\()`, Color: "#ef4444"},
+	}
+	for _, mark := range defaults {
+		_, _ = a.db.Exec(`INSERT INTO marks(name,regex,color) VALUES (?,?,?) ON CONFLICT(regex) DO UPDATE SET name=excluded.name,color=excluded.color`, mark.Name, mark.Regex, mark.Color)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "count": len(defaults)})
 }
 
 func (a *App) listFlows(w http.ResponseWriter, r *http.Request) {

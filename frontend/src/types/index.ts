@@ -16,6 +16,7 @@ export interface Flow {
   mirrored: boolean
   group_name: string
   group_count: number
+  marks: MarkHit[]
   response_code: number
   flow_id: number
   src_ip: string
@@ -28,6 +29,15 @@ export interface Flow {
   bytes_out: number
   created_at: string
 }
+
+export interface MarkHit {
+  id: number
+  name: string
+  regex: string
+  color: string
+}
+
+export interface Mark extends MarkHit {}
 
 export interface Service {
   id: number

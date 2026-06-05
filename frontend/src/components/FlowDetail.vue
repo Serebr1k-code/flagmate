@@ -76,11 +76,11 @@
             </div>
             <div v-if="hasRequest(item)" class="transcript-block block-incoming">
               <div class="block-header"><span>client -> service</span></div>
-              <pre class="block-payload">{{ formatRequestPayload(item.raw_request) }}</pre>
+              <pre class="block-payload" v-html="highlightMarks(formatRequestPayload(item.raw_request, item.marks || []), item.marks || [])"></pre>
             </div>
             <div v-if="hasResponse(item)" class="transcript-block block-outgoing" :class="{ 'negative-response': !item.banned && !isPositiveResponse(item.response_code) }">
               <div class="block-header"><span>service -> client</span></div>
-              <pre class="block-payload">{{ formatResponsePayload(item.raw_response, item.response_code) }}</pre>
+              <pre class="block-payload" v-html="highlightMarks(formatResponsePayload(item.raw_response, item.response_code, item.marks || []), item.marks || [])"></pre>
             </div>
             <div v-if="!hasRequest(item) && !hasResponse(item)" class="empty-state">No payload captured for flow {{ item.id }}</div>
           </div>
@@ -149,7 +149,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import api from '@/utils/api'
-import type { Flow, Pattern } from '@/types'
+import type { Flow, MarkHit, Pattern } from '@/types'
 
 const props = defineProps<{ flow: Flow }>()
 const emit = defineEmits<{ close: []; checkerToggled: [flow: Flow]; banClicked: [flow: Flow]; flowUpdated: [flow: Flow] }>()
@@ -234,12 +234,12 @@ function isPositiveResponse(code: number) {
 function hasRequest(flow: Flow) { return !!flow.raw_request && Object.keys(flow.raw_request).length > 0 }
 function hasResponse(flow: Flow) { return !!flow.raw_response && Object.keys(flow.raw_response).length > 0 }
 
-function formatRequestPayload(raw: Record<string, any>): string {
+function formatRequestPayload(raw: Record<string, any>, marks: MarkHit[] = []): string {
   const method = stringValue(raw.method || 'GET')
   const uri = stringValue(raw.uri || raw.url || '/')
   const query = stringValue(raw.query || '')
   const headers = normalizeHeaders(raw.headers)
-  const body = formatBodyForDisplay(raw.body || '', headers)
+  const body = formatBodyForDisplay(raw.body || '', headers, marks)
   const lines: string[] = []
   lines.push(`${method} ${uri}${query ? `?${query}` : ''} HTTP`)
   for (const [key, value] of Object.entries(headers)) lines.push(`${key}: ${value}`)
@@ -257,10 +257,10 @@ function formatRequestPayload(raw: Record<string, any>): string {
   return lines.join('\n')
 }
 
-function formatResponsePayload(raw: Record<string, any>, responseCode: number | null): string {
+function formatResponsePayload(raw: Record<string, any>, responseCode: number | null, marks: MarkHit[] = []): string {
   const status = Number(raw.status || responseCode || 0)
   const headers = normalizeHeaders(raw.headers)
-  const body = formatBodyForDisplay(raw.body || '', headers)
+  const body = formatBodyForDisplay(raw.body || '', headers, marks)
   const lines: string[] = []
   if (status) lines.push(`HTTP ${status}`)
   for (const [key, value] of Object.entries(headers)) lines.push(`${key}: ${value}`)
@@ -285,14 +285,64 @@ function normalizeHeaders(raw: any): Record<string, string> {
   return out
 }
 
-function formatBodyForDisplay(raw: any, headers: Record<string, string>): string {
+function formatBodyForDisplay(raw: any, headers: Record<string, string>, marks: MarkHit[] = []): string {
   const body = stringValue(raw)
   if (!body) return ''
   const json = tryFormatJSON(body)
-  if (json) return json
+  if (json) return preserveMarkText(body, json, marks)
   const contentType = Object.entries(headers).find(([key]) => key.toLowerCase() === 'content-type')?.[1] || ''
-  if (isLongHTML(body, contentType)) return extractUsefulHTMLText(body)
+  if (isLongHTML(body, contentType)) return preserveMarkText(body, extractUsefulHTMLText(body), marks)
   return body
+}
+
+function preserveMarkText(raw: string, formatted: string, marks: MarkHit[]) {
+  for (const mark of marks) {
+    try {
+      const re = new RegExp(mark.regex, 'i')
+      const match = raw.match(re)?.[0]
+      if (match && !formatted.includes(match)) return raw
+    } catch {}
+  }
+  return formatted
+}
+
+function highlightMarks(text: string, marks: MarkHit[]): string {
+  if (!marks.length || !text) return escapeHTML(text)
+  const ranges: Array<{ start: number; end: number; color: string }> = []
+  for (const mark of marks) {
+    try {
+      const re = new RegExp(mark.regex, 'gi')
+      for (const match of text.matchAll(re)) {
+        if (match.index === undefined || !match[0]) continue
+        ranges.push({ start: match.index, end: match.index + match[0].length, color: mark.color })
+      }
+    } catch {}
+  }
+  if (!ranges.length) return escapeHTML(text)
+  ranges.sort((a, b) => a.start - b.start || b.end - a.end)
+  const merged: typeof ranges = []
+  for (const r of ranges) {
+    const last = merged[merged.length - 1]
+    if (last && r.start < last.end) continue
+    merged.push(r)
+  }
+  let out = ''
+  let cursor = 0
+  for (const r of merged) {
+    out += escapeHTML(text.slice(cursor, r.start))
+    out += `<mark style="background:${escapeAttr(r.color)}55;border-bottom:1px solid ${escapeAttr(r.color)};color:inherit;padding:0 2px;border-radius:3px">${escapeHTML(text.slice(r.start, r.end))}</mark>`
+    cursor = r.end
+  }
+  out += escapeHTML(text.slice(cursor))
+  return out
+}
+
+function escapeHTML(value: string) {
+  return value.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] || ch))
+}
+
+function escapeAttr(value: string) {
+  return /^#[0-9a-f]{6}$/i.test(value) ? value : '#ef4444'
 }
 
 function tryFormatJSON(body: string): string | null {
