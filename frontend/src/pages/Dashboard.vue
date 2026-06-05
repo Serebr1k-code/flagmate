@@ -42,6 +42,7 @@
         @close="selectedFlow = null"
         @checker-toggled="onCheckerToggled"
         @ban-clicked="onBanClicked"
+        @ban-text="onBanText"
         @flow-updated="onFlowUpdated"
       />
     </main>
@@ -50,6 +51,7 @@
       v-if="showWordPicker"
       :flow="wordPickerFlow"
       :unique-words="uniqueWords"
+      :initial-selection="initialBanText"
       @close="showWordPicker = false"
       @ban-words="onBanWords"
     />
@@ -79,6 +81,7 @@ const selectedFlow = ref<Flow | null>(null)
 const showWordPicker = ref(false)
 const wordPickerFlow = ref<Flow | null>(null)
 const uniqueWords = ref<string[]>([])
+const initialBanText = ref('')
 
 const tabs = [
   { id: 'flows', label: 'Flows', component: FlowTable },
@@ -122,6 +125,7 @@ async function onOpenFlowId(flowId: string) {
 }
 
 async function onBanClicked(flow: Flow) {
+  initialBanText.value = ''
   try {
     const { data } = await api.get(`/flows/${flow.id}/unique-words`)
     uniqueWords.value = data.words || []
@@ -133,7 +137,13 @@ async function onBanClicked(flow: Flow) {
   showWordPicker.value = true
 }
 
+async function onBanText(payload: { flow: Flow; text: string }) {
+  initialBanText.value = payload.text
+  await onOpenWordPicker(payload.flow)
+}
+
 async function onOpenWordPicker(flow: Flow) {
+  if (!initialBanText.value) initialBanText.value = ''
   try {
     const { data } = await api.get(`/flows/${flow.id}/unique-words`)
     uniqueWords.value = data.words || []

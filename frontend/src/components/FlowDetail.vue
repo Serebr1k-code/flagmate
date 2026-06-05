@@ -1,5 +1,5 @@
 <template>
-  <section class="flow-detail-panel" @scroll="onPanelScroll">
+  <section class="flow-detail-panel" @scroll="onPanelScroll" @mouseup="openBanForSelection">
         <div class="dialog-header">
           <h2 class="dialog-title">Flow Detail</h2>
           <span class="mono text-sm hash-label">{{ flow.hash.substring(0, 16) }}...</span>
@@ -76,11 +76,11 @@
             </div>
             <div v-if="hasRequest(item)" class="transcript-block block-incoming">
               <div class="block-header"><span>client -> service</span></div>
-              <pre class="block-payload" v-html="highlightPayload(formatRequestPayload(item.raw_request, item.marks || []), item.marks || [])"></pre>
+              <pre class="block-payload" @click.stop="openBanForHighlighted($event, item)" v-html="highlightPayload(formatRequestPayload(item.raw_request, item.marks || []), item.marks || [])"></pre>
             </div>
             <div v-if="hasResponse(item)" class="transcript-block block-outgoing" :class="{ 'negative-response': !item.banned && !isPositiveResponse(item.response_code) }">
               <div class="block-header"><span>service -> client</span></div>
-              <pre class="block-payload" v-html="highlightPayload(formatResponsePayload(item.raw_response, item.response_code, item.marks || []), item.marks || [])"></pre>
+              <pre class="block-payload" @click.stop="openBanForHighlighted($event, item)" v-html="highlightPayload(formatResponsePayload(item.raw_response, item.response_code, item.marks || []), item.marks || [])"></pre>
             </div>
             <div v-if="!hasRequest(item) && !hasResponse(item)" class="empty-state">No payload captured for flow {{ item.id }}</div>
           </div>
@@ -152,7 +152,7 @@ import api from '@/utils/api'
 import type { Flow, MarkHit, Pattern } from '@/types'
 
 const props = defineProps<{ flow: Flow }>()
-const emit = defineEmits<{ close: []; checkerToggled: [flow: Flow]; banClicked: [flow: Flow]; flowUpdated: [flow: Flow] }>()
+const emit = defineEmits<{ close: []; checkerToggled: [flow: Flow]; banClicked: [flow: Flow]; banText: [payload: { flow: Flow; text: string }]; flowUpdated: [flow: Flow] }>()
 
 const flowHistory = ref<Flow[]>([])
 const loading = ref(true)
@@ -214,6 +214,21 @@ function onPanelScroll(event: Event) {
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 320) {
     fetchFlowHistory(false)
   }
+}
+
+function openBanForSelection() {
+  const selection = window.getSelection()?.toString().trim()
+  if (!selection || selection.length < 2) return
+  emit('banText', { flow: props.flow, text: selection })
+  window.getSelection()?.removeAllRanges()
+}
+
+function openBanForHighlighted(event: MouseEvent, flow: Flow) {
+  const target = event.target as HTMLElement | null
+  const hit = target?.closest('[data-ban-hit]') as HTMLElement | null
+  const text = hit?.textContent?.trim()
+  if (!text) return
+  emit('banText', { flow, text })
 }
 
 function formatTime(ts: string | null) {
@@ -349,7 +364,7 @@ function highlightPayload(text: string, marks: MarkHit[]): string {
   for (const r of merged) {
     out += escapeHTML(text.slice(cursor, r.start))
     const isDiff = r.color.toLowerCase() === '#a855f7'
-    out += `<mark style="background:${escapeAttr(r.color)}${isDiff ? '22' : '55'};border-bottom:${isDiff ? '2px dashed' : '1px solid'} ${escapeAttr(r.color)};color:inherit;padding:0 2px;border-radius:3px">${escapeHTML(text.slice(r.start, r.end))}</mark>`
+    out += `<mark data-ban-hit="1" style="background:${escapeAttr(r.color)}${isDiff ? '22' : '55'};border-bottom:${isDiff ? '2px dashed' : '1px solid'} ${escapeAttr(r.color)};color:inherit;padding:0 2px;border-radius:3px;cursor:pointer">${escapeHTML(text.slice(r.start, r.end))}</mark>`
     cursor = r.end
   }
   out += escapeHTML(text.slice(cursor))

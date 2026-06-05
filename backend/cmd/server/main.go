@@ -80,6 +80,7 @@ type Mark struct {
 	Color  string `json:"color"`
 	Banned bool   `json:"banned"`
 	Active bool   `json:"active"`
+	Order  int    `json:"order"`
 	Flows  int    `json:"flows"`
 	Groups int    `json:"groups"`
 }
@@ -257,6 +258,7 @@ func main() {
 		pr.Get("/marks", app.listMarks)
 		pr.Post("/marks", app.createMark)
 		pr.Post("/marks/defaults", app.loadDefaultMarks)
+		pr.Post("/marks/reorder", app.reorderMarks)
 		pr.Post("/marks/{id}/ban", app.banMark)
 		pr.Post("/marks/{id}/unban", app.unbanMark)
 		pr.Post("/marks/{id}/toggle", app.toggleMark)
@@ -338,7 +340,7 @@ func initSchema(db *sql.DB) error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS services (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, port INTEGER NOT NULL UNIQUE, protocol TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
 		`CREATE TABLE IF NOT EXISTS patterns (id INTEGER PRIMARY KEY AUTOINCREMENT, service_id INTEGER NULL, pattern TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', mode TEXT NOT NULL DEFAULT 'B', active INTEGER NOT NULL DEFAULT 1, match_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
-		`CREATE TABLE IF NOT EXISTS marks (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '', regex TEXT NOT NULL UNIQUE, color TEXT NOT NULL DEFAULT '#ef4444', active INTEGER NOT NULL DEFAULT 1);`,
+		`CREATE TABLE IF NOT EXISTS marks (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '', regex TEXT NOT NULL UNIQUE, color TEXT NOT NULL DEFAULT '#ef4444', active INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0);`,
 		`CREATE TABLE IF NOT EXISTS flows (id TEXT PRIMARY KEY, service_id INTEGER NULL, direction TEXT NOT NULL, start_ts TEXT NULL, end_ts TEXT NULL, raw_request TEXT NOT NULL, raw_response TEXT NOT NULL, hash TEXT NOT NULL, stable INTEGER NOT NULL DEFAULT 0, checker INTEGER NOT NULL DEFAULT 0, banned INTEGER NOT NULL DEFAULT 0, response_code INTEGER NOT NULL DEFAULT 0, flow_id INTEGER NOT NULL DEFAULT 0, src_ip TEXT NOT NULL, dst_ip TEXT NOT NULL, src_port INTEGER NOT NULL, dst_port INTEGER NOT NULL, proto TEXT NOT NULL, pkt_count INTEGER NOT NULL DEFAULT 0, bytes_in INTEGER NOT NULL DEFAULT 0, bytes_out INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
 		`CREATE TABLE IF NOT EXISTS flow_payloads (hash TEXT PRIMARY KEY, payload TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
 		`CREATE INDEX IF NOT EXISTS idx_flows_created_at ON flows(created_at DESC);`,
@@ -362,6 +364,7 @@ func initSchema(db *sql.DB) error {
 	_, _ = db.Exec(`ALTER TABLE flow_group_meta ADD COLUMN name TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE flow_group_meta ADD COLUMN checker INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`ALTER TABLE marks ADD COLUMN active INTEGER NOT NULL DEFAULT 1`)
+	_, _ = db.Exec(`ALTER TABLE marks ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`ALTER TABLE flows ADD COLUMN req_hash TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE flows ADD COLUMN resp_hash TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_patterns_service ON patterns(service_id)`)
@@ -1277,7 +1280,7 @@ func (a *App) matchingMarks(f Flow) []MarkHit {
 }
 
 func (a *App) allMarks() []Mark {
-	rows, err := a.db.Query(`SELECT id,name,regex,color,active FROM marks WHERE active = 1 ORDER BY id ASC`)
+	rows, err := a.db.Query(`SELECT id,name,regex,color,active,sort_order FROM marks WHERE active = 1 ORDER BY sort_order ASC, id ASC`)
 	if err != nil {
 		return []Mark{}
 	}
@@ -1286,7 +1289,7 @@ func (a *App) allMarks() []Mark {
 	for rows.Next() {
 		var m Mark
 		var active int
-		if rows.Scan(&m.ID, &m.Name, &m.Regex, &m.Color, &active) == nil {
+		if rows.Scan(&m.ID, &m.Name, &m.Regex, &m.Color, &active, &m.Order) == nil {
 			m.Active = active == 1
 			out = append(out, m)
 		}
@@ -1608,7 +1611,7 @@ func (a *App) listMarks(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *App) marksWithStats() ([]Mark, error) {
-	rows, err := a.db.Query(`SELECT m.id,m.name,m.regex,m.color,m.active,EXISTS(SELECT 1 FROM patterns p WHERE p.pattern = m.regex) FROM marks m ORDER BY m.id ASC`)
+	rows, err := a.db.Query(`SELECT m.id,m.name,m.regex,m.color,m.active,m.sort_order,EXISTS(SELECT 1 FROM patterns p WHERE p.pattern = m.regex) FROM marks m ORDER BY m.sort_order ASC, m.id ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -1617,7 +1620,7 @@ func (a *App) marksWithStats() ([]Mark, error) {
 	for rows.Next() {
 		var mark Mark
 		var active, banned int
-		if rows.Scan(&mark.ID, &mark.Name, &mark.Regex, &mark.Color, &active, &banned) != nil {
+		if rows.Scan(&mark.ID, &mark.Name, &mark.Regex, &mark.Color, &active, &mark.Order, &banned) != nil {
 			continue
 		}
 		mark.Active = active == 1
@@ -1672,7 +1675,8 @@ func (a *App) createMark(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(in.Color) == "" {
 		in.Color = "#ef4444"
 	}
-	_, err := a.db.Exec(`INSERT INTO marks(name,regex,color) VALUES (?,?,?) ON CONFLICT(regex) DO UPDATE SET name=excluded.name,color=excluded.color`, strings.TrimSpace(in.Name), in.Regex, in.Color)
+	order := a.nextMarkOrder()
+	_, err := a.db.Exec(`INSERT INTO marks(name,regex,color,sort_order) VALUES (?,?,?,?) ON CONFLICT(regex) DO UPDATE SET name=excluded.name,color=excluded.color`, strings.TrimSpace(in.Name), in.Regex, in.Color, order)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -1680,9 +1684,45 @@ func (a *App) createMark(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "ok"})
 }
 
+func (a *App) nextMarkOrder() int {
+	var maxOrder sql.NullInt64
+	_ = a.db.QueryRow(`SELECT MAX(sort_order) FROM marks`).Scan(&maxOrder)
+	if !maxOrder.Valid {
+		return 100
+	}
+	return int(maxOrder.Int64) + 100
+}
+
 func (a *App) deleteMark(w http.ResponseWriter, r *http.Request) {
 	_, err := a.db.Exec(`DELETE FROM marks WHERE id = ?`, chi.URLParam(r, "id"))
 	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (a *App) reorderMarks(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		IDs []int `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || len(in.IDs) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ids required"})
+		return
+	}
+	tx, err := a.db.Begin()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer tx.Rollback()
+	for idx, id := range in.IDs {
+		if _, err := tx.Exec(`UPDATE marks SET sort_order = ? WHERE id = ?`, (idx+1)*100, id); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -1695,6 +1735,7 @@ func (a *App) banMark(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "mark not found"})
 		return
 	}
+	_, _ = a.db.Exec(`INSERT INTO patterns(service_id,pattern,description,mode,active,created_at) SELECT NULL,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM patterns WHERE service_id IS NULL AND pattern = ?)`, mark.Regex, "Ban from mark: "+markLabel(mark), "B", 1, time.Now().UTC().Format(time.RFC3339), mark.Regex)
 	rows, err := a.db.Query(`SELECT id FROM services`)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -1748,7 +1789,7 @@ func (a *App) toggleMark(w http.ResponseWriter, r *http.Request) {
 func (a *App) markByID(id string) (Mark, bool) {
 	var mark Mark
 	var active int
-	err := a.db.QueryRow(`SELECT id,name,regex,color,active FROM marks WHERE id = ?`, id).Scan(&mark.ID, &mark.Name, &mark.Regex, &mark.Color, &active)
+	err := a.db.QueryRow(`SELECT id,name,regex,color,active,sort_order FROM marks WHERE id = ?`, id).Scan(&mark.ID, &mark.Name, &mark.Regex, &mark.Color, &active, &mark.Order)
 	mark.Active = active == 1
 	return mark, err == nil
 }
@@ -1773,8 +1814,8 @@ func (a *App) loadDefaultMarks(w http.ResponseWriter, _ *http.Request) {
 		{Name: "file upload shell", Regex: `(?i)(?:filename=\"?[^\";]*(?:\.php|\.phtml|\.jsp|\.aspx|\.sh)\b|Content-Type:\s*(?:application/x-php|text/x-php))`, Color: "#ec4899"},
 		{Name: "webshell", Regex: `(?i)(?:cmd=|exec=|system\s*\(|passthru\s*\(|shell_exec\s*\(|eval\s*\(|assert\s*\()`, Color: "#ef4444"},
 	}
-	for _, mark := range defaults {
-		_, _ = a.db.Exec(`INSERT INTO marks(name,regex,color) VALUES (?,?,?) ON CONFLICT(regex) DO UPDATE SET name=excluded.name,color=excluded.color`, mark.Name, mark.Regex, mark.Color)
+	for idx, mark := range defaults {
+		_, _ = a.db.Exec(`INSERT INTO marks(name,regex,color,sort_order) VALUES (?,?,?,?) ON CONFLICT(regex) DO UPDATE SET name=excluded.name,color=excluded.color`, mark.Name, mark.Regex, mark.Color, (idx+1)*100)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "count": len(defaults)})
 }
@@ -1984,7 +2025,7 @@ func (a *App) matchingPatterns(flow Flow) []Pattern {
 	if flow.ServiceID == nil {
 		return []Pattern{}
 	}
-	rows, err := a.db.Query(`SELECT id,service_id,pattern,description,mode,active,match_count,created_at FROM patterns WHERE service_id = ?`, *flow.ServiceID)
+	rows, err := a.db.Query(`SELECT id,service_id,pattern,description,mode,active,match_count,created_at FROM patterns WHERE service_id = ? OR service_id IS NULL`, *flow.ServiceID)
 	if err != nil {
 		return []Pattern{}
 	}

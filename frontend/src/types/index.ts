@@ -37,6 +37,7 @@ export interface MarkHit {
   color: string
   banned?: boolean
   active?: boolean
+  order?: number
   flows?: number
   groups?: number
 }

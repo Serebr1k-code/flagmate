@@ -129,7 +129,7 @@ import { ref, computed, watch } from 'vue'
 import api from '@/utils/api'
 import type { Flow } from '@/types'
 
-const props = defineProps<{ flow: Flow | null; uniqueWords: string[] }>()
+const props = defineProps<{ flow: Flow | null; uniqueWords: string[]; initialSelection?: string }>()
 type BanMode = 'B' | 'C' | 'S'
 type BanCandidate = { pattern: string; mode: BanMode; label?: string }
 
@@ -293,6 +293,13 @@ watch(selectedItems, () => {
   if (impactTimer) clearTimeout(impactTimer)
   impactTimer = setTimeout(fetchImpact, 250)
 })
+
+watch(() => props.initialSelection, (value) => {
+  if (value && value.trim()) {
+    selectedWords.value.add(keyFor(value.trim(), 'B'))
+    selectedWords.value = new Set(selectedWords.value)
+  }
+}, { immediate: true })
 
 async function fetchImpact() {
   if (!props.flow || selectedItems.value.length === 0) {
