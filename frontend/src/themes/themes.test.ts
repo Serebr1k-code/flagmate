@@ -16,11 +16,12 @@ describe('Themes', () => {
       'popover', 'popoverForeground'
     ]
 
-    for (const [name, theme] of Object.entries(themes)) {
+    for (const theme of Object.values(themes)) {
+      const colors = theme.colors as Record<string, string>
       for (const color of requiredColors) {
         expect(theme.colors).toHaveProperty(color)
-        expect(typeof theme.colors[color]).toBe('string')
-        expect(theme.colors[color].length).toBeGreaterThan(0)
+        expect(typeof colors[color]).toBe('string')
+        expect(colors[color].length).toBeGreaterThan(0)
       }
     }
   })

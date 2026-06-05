@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useThemeStore } from '@/stores/theme'
-import { themes } from '@/themes'
 
 vi.stubGlobal('localStorage', {
   getItem: vi.fn(() => null),
@@ -24,7 +23,7 @@ describe('Theme Store', () => {
     const store = useThemeStore()
     store.applyTheme('dracula')
     expect(store.currentTheme).toBe('dracula')
-    expect(localStorage.setItem).toHaveBeenCalledWith('theme', 'dracula')
+    expect(document.cookie).toContain('flagmate_theme=dracula')
   })
 
   it('should have access to all themes', () => {
