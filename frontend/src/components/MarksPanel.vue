@@ -56,10 +56,11 @@ const marks = ref<Mark[]>([])
 const draft = ref({ name: '', regex: '', color: '#ef4444' })
 const draggingId = ref<number | null>(null)
 const insertIndex = ref<number | null>(null)
+const reordering = ref(false)
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 async function fetchMarks() {
-  if (draggingId.value !== null) return
+  if (draggingId.value !== null || reordering.value) return
   const { data } = await api.get('/marks')
   marks.value = data || []
 }
@@ -117,8 +118,13 @@ async function onDrop() {
   if (from === to) return clearDrag()
   next.splice(to, 0, moved)
   marks.value = next
-  clearDrag()
-  await api.post('/marks/reorder', { ids: next.map(mark => mark.id) })
+  reordering.value = true
+  try {
+    await api.post('/marks/reorder', { ids: next.map(mark => mark.id) })
+  } finally {
+    clearDrag()
+    reordering.value = false
+  }
   await fetchMarks()
 }
 

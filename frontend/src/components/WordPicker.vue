@@ -45,11 +45,6 @@
               {{ word }}
             </span>
           </div>
-          <div class="impact-row">
-            <span>groups: {{ impact.groups }}</span>
-            <span>flows: {{ impact.flows }}</span>
-            <span>checkers: {{ impact.checkers }}</span>
-          </div>
         </div>
 
         <div v-if="payloadHints.length > 0" class="words-section payload-section">
@@ -89,9 +84,11 @@
               v-for="hint in markerHints"
               :key="hint.pattern + hint.mode + hint.label"
               class="word-chip marker-chip"
-              :style="{ borderColor: hint.color, backgroundColor: `${hint.color}22`, color: hint.color }"
+              :style="markerStyle(hint)"
               :class="{ selected: isSelected(hint.pattern, hint.mode) }"
-              :title="hint.label"
+              @mouseenter="showHint($event, hint.label || '')"
+              @mousemove="moveHint($event)"
+              @mouseleave="hideHint"
               @click="toggleWord(hint.pattern, hint.mode)"
             >
               {{ hint.pattern }}
@@ -121,8 +118,9 @@
             <span
               v-for="item in selectedItems"
               :key="item.key"
-              class="word-chip selected"
+              class="word-chip selected selected-ban-chip"
               @click="toggleWord(item.pattern, item.mode)"
+              @contextmenu.prevent="cycleMode(item)"
             >
               {{ item.pattern }} <small>{{ modeLabel(item.mode) }}</small> ×
             </span>
@@ -131,12 +129,19 @@
         </div>
 
         <div class="dialog-footer">
+          <div class="footer-impact">
+            <span v-if="impactPercent > 25" class="impact-warning">This will ban ~{{ impactPercent }}% flows ({{ impact.flows }}/{{ impactTotal }})!</span>
+            <span>groups: {{ impact.groups }}</span>
+            <span>flows: {{ impact.flows }}</span>
+            <span>checkers: {{ impact.checkers }}</span>
+          </div>
           <button class="btn btn-outline" @click="$emit('close')">Cancel</button>
           <button class="btn btn-destructive" :disabled="selectedItems.length === 0" @click="banWords">
             Ban {{ selectedItems.length }} rule(s)
           </button>
         </div>
       </div>
+      <div v-if="tooltip.text" class="mark-tooltip" :style="{ left: `${tooltip.x}px`, top: `${tooltip.y}px` }">{{ tooltip.text }}</div>
     </div>
   </Teleport>
 </template>
@@ -156,7 +161,10 @@ const selectedWords = ref(new Set<string>())
 const customWord = ref('')
 const customMode = ref<BanMode>('B')
 const impact = ref({ groups: 0, flows: 0, checkers: 0 })
+const impactTotal = ref(0)
+const tooltip = ref({ text: '', x: 0, y: 0 })
 let impactTimer: ReturnType<typeof setTimeout> | null = null
+const impactPercent = computed(() => impactTotal.value ? Math.round((impact.value.flows / impactTotal.value) * 100) : 0)
 
 const pathWords = computed(() => {
   const uri = String(props.flow?.raw_request?.uri || props.flow?.raw_request?.url || '')
@@ -250,6 +258,13 @@ function toggleWord(word: string, mode: BanMode) {
   } else {
     selectedWords.value.add(key)
   }
+  selectedWords.value = new Set(selectedWords.value)
+}
+
+function cycleMode(item: { pattern: string; mode: BanMode }) {
+  const next = item.mode === 'B' ? 'C' : item.mode === 'C' ? 'S' : 'B'
+  selectedWords.value.delete(keyFor(item.pattern, item.mode))
+  selectedWords.value.add(keyFor(item.pattern, next))
   selectedWords.value = new Set(selectedWords.value)
 }
 
@@ -353,8 +368,19 @@ async function fetchImpact() {
   try {
     const { data } = await api.post('/patterns/preview', { service_id: props.flow.service_id, rules: selectedItems.value })
     impact.value = { groups: data.groups || 0, flows: data.flows || 0, checkers: data.checkers || 0 }
+    impactTotal.value = data.total_flows || 0
   } catch (e) { console.error('Failed to preview ban impact:', e) }
 }
+
+function markerStyle(hint: BanCandidate) {
+  const selected = isSelected(hint.pattern, hint.mode)
+  const color = hint.color || '#ef4444'
+  return { borderColor: color, backgroundColor: selected ? `${color}66` : `${color}22`, color }
+}
+
+function showHint(event: MouseEvent, text: string) { tooltip.value = { text, x: event.clientX + 12, y: event.clientY + 12 } }
+function moveHint(event: MouseEvent) { if (tooltip.value.text) tooltip.value = { ...tooltip.value, x: event.clientX + 12, y: event.clientY + 12 } }
+function hideHint() { tooltip.value = { text: '', x: 0, y: 0 } }
 </script>
 
 <style scoped>
@@ -373,6 +399,7 @@ async function fetchImpact() {
 .word-chip { padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid var(--border); background-color: var(--surface); color: var(--text); transition: all 0.15s; user-select: none; }
 .word-chip:hover { filter: brightness(1.1); }
 .word-chip.selected { background-color: var(--destructive); color: var(--destructive-foreground); border-color: var(--destructive); }
+.selected-ban-chip { background-color: rgba(239, 68, 68, 0.16) !important; border-color: rgba(239, 68, 68, 0.7) !important; color: #fca5a5 !important; }
 .path-chip { background-color: rgba(59, 130, 246, 0.16); border-color: rgba(59, 130, 246, 0.65); color: #93c5fd; font-weight: 600; }
 .path-chip.selected { background-color: #2563eb; border-color: #60a5fa; color: #fff; }
 .payload-chip { background-color: rgba(245, 158, 11, 0.14); border-color: rgba(245, 158, 11, 0.55); color: #fbbf24; font-weight: 600; }
@@ -380,10 +407,12 @@ async function fetchImpact() {
 .response-chip { background-color: rgba(16, 185, 129, 0.14); border-color: rgba(16, 185, 129, 0.55); color: #6ee7b7; font-weight: 600; }
 .response-chip.selected { background-color: #059669; border-color: #6ee7b7; color: #fff; }
 .word-chip small { margin-left: 6px; opacity: 0.75; font-size: 11px; }
-.impact-row { display: flex; gap: 12px; margin-top: 10px; color: var(--text-muted); font-size: 12px; }
-.impact-row span { padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); }
 .empty-state { padding: 16px; text-align: center; color: var(--text-muted); font-size: 14px; }
-.dialog-footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border); }
+.dialog-footer { position: sticky; bottom: 0; display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); background: var(--card); z-index: 5; }
+.footer-impact { margin-right: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--text-muted); font-size: 12px; }
+.footer-impact span:not(.impact-warning) { padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); }
+.impact-warning { color: var(--destructive); font-weight: 700; }
+.mark-tooltip { position: fixed; z-index: 1300; pointer-events: none; padding: 6px 9px; border-radius: 6px; background: var(--card); border: 1px solid var(--border); color: var(--text); box-shadow: 0 8px 24px rgba(0,0,0,.35); font-size: 12px; }
 .mono { font-family: 'JetBrains Mono', monospace; }
 .label { font-size: 12px; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
 .flex-1 { flex: 1; }

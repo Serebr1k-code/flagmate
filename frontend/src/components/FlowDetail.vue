@@ -193,7 +193,7 @@ const displayedHistory = computed(() => {
 
 const extractedVariables = computed(() => {
   const text = `${formatRequestPayload(props.flow.raw_request, props.flow.marks || [])}\n${formatResponsePayload(props.flow.raw_response, props.flow.response_code, props.flow.marks || [])}`
-  return Array.from(new Set((text.match(/[A-Za-z0-9_+\-=./:]{6,96}/g) || []).filter(token => /(?:token|secret|flag|admin|cmd|file|path|callback|http|\/|=|\d{4,})/i.test(token)).slice(0, 18)))
+  return Array.from(new Set((text.match(/[A-Za-z0-9_+\-=./:]{6,96}/g) || []).filter(token => /(?:token|secret|flag|admin|cmd|file|path|callback|http|\/|=|\d{4,})/i.test(token)).filter(token => !/^[A-Za-z0-9+/=]{16,}$/.test(token) && !/^(BaseHTTP|Python\/)/.test(token)).slice(0, 18)))
 })
 
 async function fetchFlowHistory(reset = true) {
@@ -598,12 +598,11 @@ async function confirmUnbanFlow() {
 .block-header { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: rgba(255,255,255,0.08); flex-wrap: wrap; border-bottom: 1px solid rgba(255,255,255,0.1); }
 .block-time { font-size: 13px; color: #ccc; margin-right: auto; font-weight: 600; }
 .block-payload { padding: 14px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; line-height: 1.6; overflow: visible; white-space: pre-wrap; word-break: break-word; display: block; min-height: 50px; color: #eee; width: 100%; box-sizing: border-box; }
-.frame-list { display: flex; flex-direction: column; gap: 8px; }
+.frame-list { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 10px; }
 .frame-row { border: 1px solid var(--border); border-radius: 8px; padding: 8px; background: var(--card); }
 .frame-row b { display: block; margin-bottom: 6px; font-size: 12px; color: var(--text-muted); }
 .frame-row pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
-.client-frame { border-left: 3px solid var(--primary); }
-.server-frame { border-left: 3px solid var(--success); }
+.client-frame, .server-frame { border-left: 1px solid var(--border); }
 .code-block { background-color: var(--surface); color: var(--text); }
 .empty-state { text-align: center; padding: 32px; color: var(--text-muted); }
 .dialog-footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border); }

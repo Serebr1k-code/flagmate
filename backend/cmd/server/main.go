@@ -391,14 +391,8 @@ func (a *App) migrateFlowHashes() {
 		log.Printf("flow hash migration query error: %v", err)
 		return
 	}
-	defer rows.Close()
-	tx, err := a.db.Begin()
-	if err != nil {
-		log.Printf("flow hash migration tx error: %v", err)
-		return
-	}
-	defer tx.Rollback()
-	updated := 0
+	type hashUpdate struct{ id, hash string }
+	updates := []hashUpdate{}
 	for rows.Next() {
 		flow, err := scanFlow(rows)
 		if err != nil {
@@ -410,10 +404,20 @@ func (a *App) migrateFlowHashes() {
 			serviceID = *flow.ServiceID
 		}
 		newHash := flowHash(flow.RawRequest, flow.RawResponse, serviceID)
-		if newHash == flow.Hash {
-			continue
+		if newHash != flow.Hash {
+			updates = append(updates, hashUpdate{id: flow.ID, hash: newHash})
 		}
-		if _, err := tx.Exec(`UPDATE flows SET hash = ? WHERE id = ?`, newHash, flow.ID); err == nil {
+	}
+	_ = rows.Close()
+	tx, err := a.db.Begin()
+	if err != nil {
+		log.Printf("flow hash migration tx error: %v", err)
+		return
+	}
+	defer tx.Rollback()
+	updated := 0
+	for _, update := range updates {
+		if _, err := tx.Exec(`UPDATE flows SET hash = ? WHERE id = ?`, update.hash, update.id); err == nil {
 			updated++
 		}
 	}
@@ -1746,6 +1750,7 @@ func (a *App) previewPatterns(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 	flows := 0
+	totalFlows := 0
 	checkers := 0
 	groups := map[string]struct{}{}
 	services := map[int]struct{}{}
@@ -1757,6 +1762,7 @@ func (a *App) previewPatterns(w http.ResponseWriter, r *http.Request) {
 		if in.ServiceID != nil && (flow.ServiceID == nil || *flow.ServiceID != *in.ServiceID) {
 			continue
 		}
+		totalFlows++
 		a.hydrateFlowPayloads(&flow)
 		if previewMatches(flow, in.Rules) {
 			flows++
@@ -1769,7 +1775,7 @@ func (a *App) previewPatterns(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"flows": flows, "groups": len(groups), "checkers": checkers, "services": len(services)})
+	writeJSON(w, http.StatusOK, map[string]any{"flows": flows, "groups": len(groups), "checkers": checkers, "services": len(services), "total_flows": totalFlows})
 }
 
 func previewMatches(flow Flow, rules []struct {
