@@ -2067,9 +2067,11 @@ func (a *App) setSettings(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) resetHistory(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		DeleteBans bool `json:"delete_bans"`
+		DeleteBansServices bool `json:"delete_bans_services"`
+		DeleteBans         bool `json:"delete_bans"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&in)
+	deleteBansServices := in.DeleteBansServices || in.DeleteBans
 	tx, err := a.db.Begin()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -2083,8 +2085,9 @@ func (a *App) resetHistory(w http.ResponseWriter, r *http.Request) {
 		`DELETE FROM mirror_groups`,
 		`DELETE FROM flow_group_meta`,
 	}
-	if in.DeleteBans {
+	if deleteBansServices {
 		stmts = append(stmts, `DELETE FROM patterns`)
+		stmts = append(stmts, `DELETE FROM services`)
 	}
 	for _, stmt := range stmts {
 		if _, err := tx.Exec(stmt); err != nil {
@@ -2096,7 +2099,12 @@ func (a *App) resetHistory(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "delete_bans": in.DeleteBans})
+	_, _ = a.db.Exec(`UPDATE mirroring SET enabled = 0, targets = '[]', services = '[]' WHERE id = 1`)
+	a.mirrorMu.Lock()
+	a.mirroring = MirroringConfig{Enabled: false, Targets: []MirrorTarget{}, Services: []ServiceMirrorConfig{}}
+	a.mirrorMu.Unlock()
+	a.mirrorDue = map[int]time.Time{}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "delete_bans_services": deleteBansServices})
 }
 
 func (a *App) poisonMode() string {

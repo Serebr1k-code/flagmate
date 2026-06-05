@@ -28,7 +28,7 @@
     <div class="card setting-row danger-row">
       <div>
         <h3>Reset captured history</h3>
-        <p class="text-muted">Delete all captured flows, payloads, mirror attempts, and mirrored groups.</p>
+        <p class="text-muted">Delete captured flows, payloads, mirror settings, mirror stats, target teams, and logs.</p>
       </div>
       <button class="btn btn-destructive" @click="showResetConfirm = true">Reset history</button>
     </div>
@@ -40,7 +40,7 @@
           <p class="text-muted">This will delete all captured flow history and mirroring stats. This cannot be undone.</p>
           <label class="checkbox-row">
             <input v-model="deleteBans" type="checkbox" />
-            <span>Also delete all ban word rules</span>
+            <span>Also delete ban word rules & services</span>
           </label>
           <div class="confirm-actions">
             <button class="btn btn-outline" @click="showResetConfirm = false">Cancel</button>
@@ -83,7 +83,7 @@ async function togglePoisonMode() {
 async function resetHistory() {
   resetting.value = true
   try {
-    await api.post('/settings/reset-history', { delete_bans: deleteBans.value })
+    await api.post('/settings/reset-history', { delete_bans_services: deleteBans.value })
     showResetConfirm.value = false
     deleteBans.value = false
   } catch (e) {
