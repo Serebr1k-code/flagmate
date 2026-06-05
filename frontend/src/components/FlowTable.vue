@@ -23,6 +23,13 @@
           <input v-model="showChecker" type="checkbox" @change="fetchFlows(true)" />
           Checker
         </label>
+        <button
+          class="btn btn-sm"
+          :class="collapseDuplicates ? 'btn-primary' : 'btn-outline'"
+          @click="toggleCollapseDuplicates"
+        >
+          {{ collapseDuplicates ? 'Duplicates collapsed' : 'Collapse duplicates' }}
+        </button>
         <button class="btn btn-sm btn-outline" @click="fetchFlows(true)">Refresh</button>
       </div>
     </div>
@@ -43,62 +50,68 @@
           </tr>
         </thead>
         <tbody>
-          <tr
-            v-for="flow in flows"
-            :key="flow.id"
-            class="flow-row"
-            :class="{
-              stable: flow.stability_pct >= 70,
-              banned: flow.banned,
-              selected: selectedFlow?.id === flow.id,
-              'negative-response': !flow.banned && !isPositiveResponse(flow.response_code)
-            }"
-            @click="$emit('open-flow', flow)"
-          >
-            <td v-if="!selectedFlow" @click.stop>
-              <input type="checkbox" class="checkbox" :checked="selected.has(flow.id)" @change="toggleSelect(flow.id)" />
-            </td>
-            <td v-if="!selectedFlow" class="text-muted">{{ formatTime(flow.created_at) }}</td>
-            <td>{{ displayDirection(flow) }}</td>
-            <td v-if="!selectedFlow">
-              <span class="badge badge-outline">{{ flow.proto }}</span>
-            </td>
-            <td v-if="!selectedFlow">
-              <span class="badge" :class="flow.stability_pct >= 70 ? 'badge-success' : 'badge-warning'">{{ stabilityLabel(flow) }}</span>
-              <span v-if="flow.checker" class="badge badge-primary">Checker</span>
-              <span v-if="flow.banned" class="badge badge-destructive">Banned</span>
-            </td>
-            <td v-if="!selectedFlow">
-              <span class="badge" :class="isPositiveResponse(flow.response_code) ? 'badge-success' : 'badge-warning'">
-                {{ flow.response_code }}
-              </span>
-            </td>
-            <td v-if="!selectedFlow" class="flow-actions-cell" @click.stop>
-              <div class="flow-actions">
-                <button
-                  v-if="flow.response_code === 200 && !flow.banned"
-                  class="btn btn-sm btn-destructive"
-                  @click="$emit('open-word-picker', flow)"
-                >
-                  Ban
-                </button>
-                <button
-                  v-else-if="flow.banned"
-                  class="btn btn-sm btn-outline"
-                  @click="unbanFlow(flow)"
-                >
-                  Unban
-                </button>
-                <button
-                  class="btn btn-sm mirror-btn"
-                  :class="flow.mirrored ? 'btn-success' : 'btn-outline'"
-                  @click="toggleMirror(flow)"
-                >
-                  {{ flow.mirrored ? 'Mirrored' : 'Mirror' }}
-                </button>
-              </div>
-            </td>
-          </tr>
+          <template v-for="flow in flows" :key="flow.id">
+            <tr
+              class="flow-row"
+              :class="rowClass(flow)"
+              @click="$emit('open-flow', flow)"
+            >
+              <td v-if="!selectedFlow" @click.stop>
+                <input type="checkbox" class="checkbox" :checked="selected.has(flow.id)" @change="toggleSelect(flow.id)" />
+              </td>
+              <td v-if="!selectedFlow" class="text-muted">{{ formatTime(flow.created_at) }}</td>
+              <td>{{ displayDirection(flow) }}</td>
+              <td v-if="!selectedFlow"><span class="badge badge-outline">{{ flow.proto }}</span></td>
+              <td v-if="!selectedFlow">
+                <span class="badge" :class="flow.stability_pct >= 70 ? 'badge-success' : 'badge-warning'">{{ stabilityLabel(flow) }}</span>
+                <span v-if="flow.group_count > 1" class="badge badge-outline">{{ flow.group_count }}x</span>
+                <span v-if="flow.checker" class="badge badge-primary">Checker</span>
+                <span v-if="flow.banned" class="badge badge-destructive">Banned</span>
+              </td>
+              <td v-if="!selectedFlow">
+                <span class="badge" :class="isPositiveResponse(flow.response_code) ? 'badge-success' : 'badge-warning'">{{ flow.response_code }}</span>
+              </td>
+              <td v-if="!selectedFlow" class="flow-actions-cell" @click.stop>
+                <div class="flow-actions">
+                  <button v-if="!flow.banned" class="btn btn-sm btn-destructive" @click="$emit('open-word-picker', flow)">Ban</button>
+                  <button v-else-if="flow.banned" class="btn btn-sm btn-outline" @click="unbanFlow(flow)">Unban</button>
+                  <button class="btn btn-sm mirror-btn" :class="flow.mirrored ? 'btn-success' : 'btn-outline'" @click="toggleMirror(flow)">
+                    {{ flow.mirrored ? 'Mirrored' : 'Mirror' }}
+                  </button>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="collapseDuplicates && flow.group_count > 1" class="expand-row" @click.stop="toggleExpanded(flow)">
+              <td :colspan="selectedFlow ? 1 : 7">
+                <span>{{ expandedHashes.has(flow.hash) ? '▴ collapse repeated streams' : `▾ ${flow.group_count - 1} repeated streams` }}</span>
+              </td>
+            </tr>
+            <template v-if="collapseDuplicates && expandedHashes.has(flow.hash)">
+              <tr
+                v-for="item in expandedFlows[flow.hash] || []"
+                :key="item.id"
+                class="flow-row repeated-row"
+                :class="rowClass(item)"
+                @click="$emit('open-flow', item)"
+              >
+                <td v-if="!selectedFlow" @click.stop></td>
+                <td v-if="!selectedFlow" class="text-muted">{{ formatTime(item.created_at) }}</td>
+                <td>{{ displayDirection(item) }}</td>
+                <td v-if="!selectedFlow"><span class="badge badge-outline">{{ item.proto }}</span></td>
+                <td v-if="!selectedFlow"><span class="badge" :class="item.stability_pct >= 70 ? 'badge-success' : 'badge-warning'">{{ stabilityLabel(item) }}</span></td>
+                <td v-if="!selectedFlow"><span class="badge" :class="isPositiveResponse(item.response_code) ? 'badge-success' : 'badge-warning'">{{ item.response_code }}</span></td>
+                <td v-if="!selectedFlow" class="flow-actions-cell" @click.stop>
+                  <div class="flow-actions">
+                    <button v-if="!item.banned" class="btn btn-sm btn-destructive" @click="$emit('open-word-picker', item)">Ban</button>
+                    <button v-else-if="item.banned" class="btn btn-sm btn-outline" @click="unbanFlow(item)">Unban</button>
+                    <button class="btn btn-sm mirror-btn" :class="item.mirrored ? 'btn-success' : 'btn-outline'" @click="toggleMirror(item)">
+                      {{ item.mirrored ? 'Mirrored' : 'Mirror' }}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </template>
           <tr v-if="flows.length === 0">
             <td :colspan="selectedFlow ? 1 : 7" class="empty-state">No flows captured yet</td>
           </tr>
@@ -113,6 +126,22 @@
       <span>{{ selected.size }} flow(s) selected</span>
       <button class="btn btn-sm btn-destructive" @click="banSelected">Ban Selected</button>
       <button class="btn btn-sm btn-ghost" @click="selected.clear()">Clear</button>
+    </div>
+
+    <div v-if="showUnbanConfirm" class="confirm-overlay" @click.self="cancelUnbanConfirm">
+      <div class="confirm-dialog">
+        <h2>Unban this flow?</h2>
+        <p class="text-muted">These service ban rules match it and will be deleted:</p>
+        <div class="confirm-list">
+          <span v-for="pattern in pendingUnbanPatterns" :key="pattern.id" class="confirm-chip">
+            {{ pattern.pattern }}
+          </span>
+        </div>
+        <div class="confirm-actions">
+          <button class="btn btn-outline" @click="cancelUnbanConfirm">Cancel</button>
+          <button class="btn btn-destructive" @click="confirmUnbanFlow">Delete rules and unban</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -136,11 +165,17 @@ const searchQuery = ref('')
 const serviceFilter = ref('')
 const showBanned = ref(true)
 const showChecker = ref(true)
+const collapseDuplicates = ref(true)
 const services = ref<Service[]>([])
 const selected = ref(new Set<string>())
 const tableContainer = ref<HTMLElement | null>(null)
 const loadingMore = ref(false)
 const hasMore = ref(true)
+const expandedHashes = ref(new Set<string>())
+const expandedFlows = ref<Record<string, Flow[]>>({})
+const showUnbanConfirm = ref(false)
+const pendingUnbanFlow = ref<Flow | null>(null)
+const pendingUnbanPatterns = ref<Array<{ id: number; pattern: string }>>([])
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
 const allSelected = computed(() => flows.value.length > 0 && selected.value.size === flows.value.length)
@@ -171,6 +206,9 @@ async function fetchFlows(reset = true) {
     if (!showChecker.value) {
       params.checker = 'false'
     }
+    if (collapseDuplicates.value) {
+      params.collapse = 'true'
+    }
     const { data } = await api.get('/flows', { params })
     const rows = data.flows || []
     flows.value = reset ? rows : [...flows.value, ...rows]
@@ -179,6 +217,41 @@ async function fetchFlows(reset = true) {
     console.error('Failed to fetch flows:', e)
   } finally {
     loadingMore.value = false
+  }
+}
+
+function toggleCollapseDuplicates() {
+  collapseDuplicates.value = !collapseDuplicates.value
+  expandedHashes.value.clear()
+  expandedHashes.value = new Set(expandedHashes.value)
+  expandedFlows.value = {}
+  fetchFlows(true)
+}
+
+function rowClass(flow: Flow) {
+  return {
+    stable: flow.stability_pct >= 70,
+    banned: flow.banned,
+    selected: false,
+    'negative-response': !flow.banned && !isPositiveResponse(flow.response_code),
+  }
+}
+
+async function toggleExpanded(flow: Flow) {
+  if (expandedHashes.value.has(flow.hash)) {
+    expandedHashes.value.delete(flow.hash)
+    expandedHashes.value = new Set(expandedHashes.value)
+    return
+  }
+  expandedHashes.value.add(flow.hash)
+  expandedHashes.value = new Set(expandedHashes.value)
+  if (!expandedFlows.value[flow.hash]) {
+    try {
+      const { data } = await api.get('/flows/history', { params: { hash: flow.hash, limit: 100, offset: 1 } })
+      expandedFlows.value = { ...expandedFlows.value, [flow.hash]: data || [] }
+    } catch (e) {
+      console.error('Failed to fetch repeated streams:', e)
+    }
   }
 }
 
@@ -263,10 +336,10 @@ async function unbanFlow(flow: Flow) {
     const { data } = await api.get(`/flows/${flow.id}/matching-patterns`)
     const patterns = Array.isArray(data) ? data : []
     if (patterns.length > 0) {
-      const list = patterns.map((p: { pattern: string }) => `- ${p.pattern}`).join('\n')
-      const ok = window.confirm(`Unban this flow? These service ban rules match it and will be deleted:\n\n${list}`)
-      if (!ok) return
-      await api.post(`/flows/${flow.id}/remove-matching-patterns`)
+      pendingUnbanFlow.value = flow
+      pendingUnbanPatterns.value = patterns
+      showUnbanConfirm.value = true
+      return
     } else {
       await api.post(`/flows/${flow.id}/unban`)
     }
@@ -274,6 +347,25 @@ async function unbanFlow(flow: Flow) {
     await fetchFlows(true)
   } catch (e) {
     console.error('Failed to unban flow:', e)
+  }
+}
+
+function cancelUnbanConfirm() {
+  showUnbanConfirm.value = false
+  pendingUnbanFlow.value = null
+  pendingUnbanPatterns.value = []
+}
+
+async function confirmUnbanFlow() {
+  const flow = pendingUnbanFlow.value
+  if (!flow) return
+  try {
+    await api.post(`/flows/${flow.id}/remove-matching-patterns`)
+    flow.banned = false
+    cancelUnbanConfirm()
+    await fetchFlows(true)
+  } catch (e) {
+    console.error('Failed to confirm unban flow:', e)
   }
 }
 
@@ -314,6 +406,9 @@ onMounted(() => {
 .table-container { flex: 1; min-height: 0; overflow: auto; }
 .filter-check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); white-space: nowrap; }
 .flow-row { cursor: pointer; }
+.repeated-row td { opacity: 0.84; padding-left: 24px; }
+.expand-row td { padding: 4px 0; text-align: center; color: var(--text-muted); font-size: 12px; border-bottom: 1px solid var(--border); cursor: pointer; background: color-mix(in srgb, var(--surface) 70%, transparent); }
+.expand-row:hover td { color: var(--primary); background: var(--surface-hover); }
 .flow-row.negative-response td { background-color: rgba(245, 158, 11, 0.12); }
 .flow-row.negative-response:hover td { background-color: rgba(245, 158, 11, 0.18); }
 .flow-row.banned td,
@@ -326,6 +421,12 @@ onMounted(() => {
 .flow-row:hover td { filter: brightness(1.05); }
 .load-state { text-align: center; color: var(--text-muted); font-size: 12px; padding: 6px; }
 .selection-bar { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 12px 24px; border-radius: 12px; display: flex; align-items: center; gap: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); z-index: 100; background-color: var(--primary); color: var(--primary-foreground); }
+.confirm-overlay { position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.65); backdrop-filter: blur(4px); }
+.confirm-dialog { width: min(560px, 94vw); background: var(--card); color: var(--card-foreground); border: 1px solid var(--border); border-radius: 12px; padding: 22px; box-shadow: 0 20px 60px rgba(0,0,0,0.45); }
+.confirm-dialog h2 { margin: 0 0 8px; font-size: 20px; }
+.confirm-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; max-height: 260px; overflow-y: auto; }
+.confirm-chip { padding: 6px 10px; border-radius: 6px; border: 1px solid var(--destructive); background: rgba(239, 68, 68, 0.16); color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .text-muted { color: var(--text-muted); }
 .text-success { color: var(--success); }
 </style>

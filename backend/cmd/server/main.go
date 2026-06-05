@@ -87,6 +87,8 @@ type Flow struct {
 	Checker      bool           `json:"checker"`
 	Banned       bool           `json:"banned"`
 	Mirrored     bool           `json:"mirrored"`
+	GroupName    string         `json:"group_name"`
+	GroupCount   int            `json:"group_count"`
 	ResponseCode int            `json:"response_code"`
 	FlowID       int64          `json:"flow_id"`
 	SrcIP        string         `json:"src_ip"`
@@ -130,6 +132,23 @@ type ServiceMirrorConfig struct {
 	Enabled         bool           `json:"enabled"`
 	IntervalSeconds int            `json:"interval_seconds"`
 	Targets         []MirrorTarget `json:"targets"`
+}
+
+type FlowGroupMeta struct {
+	Hash          string `json:"hash"`
+	Name          string `json:"name"`
+	Checker       bool   `json:"checker"`
+	Count         int    `json:"count"`
+	ExampleFlowID string `json:"example_flow_id"`
+	FirstSeen     string `json:"first_seen"`
+	LastSeen      string `json:"last_seen"`
+	Destination   string `json:"destination"`
+	Method        string `json:"method"`
+	URI           string `json:"uri"`
+	ResponseCode  int    `json:"response_code"`
+	ServiceID     *int   `json:"service_id"`
+	Mirrored      bool   `json:"mirrored"`
+	LatestFlow    *Flow  `json:"latest_flow,omitempty"`
 }
 
 type MirrorTarget struct {
@@ -215,8 +234,11 @@ func main() {
 		pr.Post("/flows/{id}/remove-matching-patterns", app.removeMatchingPatternsForFlow)
 
 		pr.Get("/flow-groups", app.flowGroups)
+		pr.Post("/flow-groups/{hash}/name", app.renameFlowGroup)
+		pr.Post("/flow-groups/{hash}/checker", app.markFlowGroupChecker)
 
 		pr.Get("/mirroring", app.getMirroring)
+		pr.Get("/mirroring/groups", app.mirroredGroups)
 		pr.Post("/mirroring", app.setMirroring)
 		pr.Get("/settings", app.getSettings)
 		pr.Post("/settings", app.setSettings)
@@ -275,10 +297,12 @@ func initSchema(db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS services (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, port INTEGER NOT NULL UNIQUE, protocol TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
 		`CREATE TABLE IF NOT EXISTS patterns (id INTEGER PRIMARY KEY AUTOINCREMENT, service_id INTEGER NULL, pattern TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', mode TEXT NOT NULL DEFAULT 'B', active INTEGER NOT NULL DEFAULT 1, match_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
 		`CREATE TABLE IF NOT EXISTS flows (id TEXT PRIMARY KEY, service_id INTEGER NULL, direction TEXT NOT NULL, start_ts TEXT NULL, end_ts TEXT NULL, raw_request TEXT NOT NULL, raw_response TEXT NOT NULL, hash TEXT NOT NULL, stable INTEGER NOT NULL DEFAULT 0, checker INTEGER NOT NULL DEFAULT 0, banned INTEGER NOT NULL DEFAULT 0, response_code INTEGER NOT NULL DEFAULT 0, flow_id INTEGER NOT NULL DEFAULT 0, src_ip TEXT NOT NULL, dst_ip TEXT NOT NULL, src_port INTEGER NOT NULL, dst_port INTEGER NOT NULL, proto TEXT NOT NULL, pkt_count INTEGER NOT NULL DEFAULT 0, bytes_in INTEGER NOT NULL DEFAULT 0, bytes_out INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
+		`CREATE TABLE IF NOT EXISTS flow_payloads (hash TEXT PRIMARY KEY, payload TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
 		`CREATE INDEX IF NOT EXISTS idx_flows_created_at ON flows(created_at DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_flows_hash ON flows(hash);`,
 		`CREATE TABLE IF NOT EXISTS mirroring (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL DEFAULT 0, targets TEXT NOT NULL DEFAULT '[]');`,
 		`CREATE TABLE IF NOT EXISTS mirror_groups (hash TEXT PRIMARY KEY, service_id INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
+		`CREATE TABLE IF NOT EXISTS flow_group_meta (hash TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', checker INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
 		`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
 		`INSERT OR IGNORE INTO mirroring(id, enabled, targets) VALUES (1, 0, '[]');`,
 		`INSERT OR IGNORE INTO settings(key, value) VALUES ('poison_mode', 'media');`,
@@ -290,8 +314,17 @@ func initSchema(db *sql.DB) error {
 	}
 	_, _ = db.Exec(`ALTER TABLE patterns ADD COLUMN service_id INTEGER NULL`)
 	_, _ = db.Exec(`ALTER TABLE mirroring ADD COLUMN services TEXT NOT NULL DEFAULT '[]'`)
+	_, _ = db.Exec(`ALTER TABLE mirror_groups ADD COLUMN name TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE flow_group_meta ADD COLUMN name TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE flow_group_meta ADD COLUMN checker INTEGER NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(`ALTER TABLE flows ADD COLUMN req_hash TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE flows ADD COLUMN resp_hash TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_patterns_service ON patterns(service_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_mirror_groups_service ON mirror_groups(service_id)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_flows_service_created ON flows(service_id, created_at DESC)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_flows_hash_created ON flows(hash, created_at DESC)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_flows_banned ON flows(banned)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_flows_checker ON flows(checker)`)
 	return nil
 }
 
@@ -925,9 +958,35 @@ func patternMatch(pattern, target string) bool {
 func (a *App) insertFlow(f Flow) error {
 	reqRaw, _ := json.Marshal(f.RawRequest)
 	respRaw, _ := json.Marshal(f.RawResponse)
-	_, err := a.db.Exec(`INSERT INTO flows (id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		f.ID, intPtrToAny(f.ServiceID), f.Direction, f.StartTS, f.EndTS, string(reqRaw), string(respRaw), f.Hash, boolInt(f.Stable), boolInt(f.Checker), boolInt(f.Banned), f.ResponseCode, f.FlowID, f.SrcIP, f.DstIP, f.SrcPort, f.DstPort, f.Proto, f.PktCount, f.BytesIn, f.BytesOut, f.CreatedAt)
+	reqHash, reqStore := a.payloadRef(reqRaw)
+	respHash, respStore := a.payloadRef(respRaw)
+	_, err := a.db.Exec(`INSERT INTO flows (id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,req_hash,resp_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		f.ID, intPtrToAny(f.ServiceID), f.Direction, f.StartTS, f.EndTS, reqStore, respStore, f.Hash, boolInt(f.Stable), boolInt(f.Checker), boolInt(f.Banned), f.ResponseCode, f.FlowID, f.SrcIP, f.DstIP, f.SrcPort, f.DstPort, f.Proto, f.PktCount, f.BytesIn, f.BytesOut, f.CreatedAt, reqHash, respHash)
 	return err
+}
+
+func (a *App) payloadRef(raw []byte) (string, string) {
+	h := sha256.Sum256(raw)
+	key := hex.EncodeToString(h[:])
+	_, _ = a.db.Exec(`INSERT OR IGNORE INTO flow_payloads(hash, payload, bytes, created_at) VALUES (?, ?, ?, ?)`, key, string(raw), len(raw), time.Now().UTC().Format(time.RFC3339))
+	return key, `{"_payload_ref":"` + key + `"}`
+}
+
+func (a *App) hydrateFlowPayloads(f *Flow) {
+	f.RawRequest = a.hydratePayloadMap(f.RawRequest)
+	f.RawResponse = a.hydratePayloadMap(f.RawResponse)
+}
+
+func (a *App) hydratePayloadMap(src map[string]any) map[string]any {
+	ref := asString(src["_payload_ref"])
+	if ref == "" {
+		return src
+	}
+	var raw string
+	if err := a.db.QueryRow(`SELECT payload FROM flow_payloads WHERE hash = ?`, ref).Scan(&raw); err != nil {
+		return src
+	}
+	return parseJSONMap(raw)
 }
 
 func flowHash(req, resp map[string]any, serviceID int) string {
@@ -951,6 +1010,19 @@ func (a *App) enrichFlow(f *Flow) {
 	f.AvgInterval = avg
 	f.Stable = pct >= 70
 	f.Mirrored = a.isMirroredGroup(f.Hash)
+	f.GroupName = a.groupName(f.Hash)
+	_ = a.db.QueryRow(`SELECT COUNT(*) FROM flows WHERE hash = ?`, f.Hash).Scan(&f.GroupCount)
+}
+
+func (a *App) groupName(hash string) string {
+	var name string
+	if err := a.db.QueryRow(`SELECT name FROM flow_group_meta WHERE hash = ?`, hash).Scan(&name); err == nil && strings.TrimSpace(name) != "" {
+		return name
+	}
+	if err := a.db.QueryRow(`SELECT name FROM mirror_groups WHERE hash = ?`, hash).Scan(&name); err == nil && strings.TrimSpace(name) != "" {
+		return name
+	}
+	return ""
 }
 
 func (a *App) isMirroredGroup(hash string) bool {
@@ -1184,6 +1256,7 @@ func (a *App) listFlows(w http.ResponseWriter, r *http.Request) {
 	serviceID := parseInt(r.URL.Query().Get("service_id"), -1)
 	bannedFilter := strings.TrimSpace(r.URL.Query().Get("banned"))
 	checkerFilter := strings.TrimSpace(r.URL.Query().Get("checker"))
+	collapse := boolQueryInt(r.URL.Query().Get("collapse")) == 1
 
 	query := `SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows`
 	args := []any{}
@@ -1201,12 +1274,18 @@ func (a *App) listFlows(w http.ResponseWriter, r *http.Request) {
 		args = append(args, boolQueryInt(checkerFilter))
 	}
 	if search != "" {
-		where = append(where, `(direction LIKE ? OR raw_request LIKE ? OR raw_response LIKE ?)`)
+		where = append(where, `(direction LIKE ? OR created_at LIKE ? OR proto LIKE ? OR src_ip LIKE ? OR dst_ip LIKE ? OR CAST(src_port AS TEXT) LIKE ? OR CAST(dst_port AS TEXT) LIKE ? OR CAST(response_code AS TEXT) LIKE ? OR raw_request LIKE ? OR raw_response LIKE ? OR req_hash IN (SELECT hash FROM flow_payloads WHERE payload LIKE ?) OR resp_hash IN (SELECT hash FROM flow_payloads WHERE payload LIKE ?))`)
 		needle := "%" + search + "%"
-		args = append(args, needle, needle, needle)
+		args = append(args, needle, needle, needle, needle, needle, needle, needle, needle, needle, needle, needle, needle)
 	}
 	if len(where) > 0 {
 		query += ` WHERE ` + strings.Join(where, ` AND `)
+	}
+	if collapse && search == "" {
+		query += ` AND created_at = (SELECT MAX(f2.created_at) FROM flows f2 WHERE f2.hash = flows.hash)`
+		if len(where) == 0 {
+			query = strings.Replace(query, ` FROM flows AND `, ` FROM flows WHERE `, 1)
+		}
 	}
 	query += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`
 	args = append(args, size, offset)
@@ -1222,6 +1301,7 @@ func (a *App) listFlows(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		f, err := scanFlow(rows)
 		if err == nil {
+			a.hydrateFlowPayloads(&f)
 			a.enrichFlow(&f)
 			flows = append(flows, f)
 		}
@@ -1237,6 +1317,7 @@ func (a *App) getFlow(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
+	a.hydrateFlowPayloads(&f)
 	a.enrichFlow(&f)
 	writeJSON(w, http.StatusOK, f)
 }
@@ -1259,6 +1340,7 @@ func (a *App) flowHistory(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		f, err := scanFlow(rows)
 		if err == nil {
+			a.hydrateFlowPayloads(&f)
 			a.enrichFlow(&f)
 			out = append(out, f)
 		}
@@ -1362,6 +1444,7 @@ func (a *App) flowByID(id string) (Flow, error) {
 	if err != nil {
 		return f, err
 	}
+	a.hydrateFlowPayloads(&f)
 	a.enrichFlow(&f)
 	return f, nil
 }
@@ -1415,6 +1498,7 @@ func (a *App) recalculateAllFlowBans() {
 		if err != nil {
 			continue
 		}
+		a.hydrateFlowPayloads(&flow)
 		shouldBan := !flow.Checker && len(a.matchingPatterns(flow)) > 0
 		if shouldBan != flow.Banned {
 			updates[flow.ID] = shouldBan
@@ -1436,7 +1520,7 @@ func (a *App) uniqueWords(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "flow not found"})
 		return
 	}
-	base := extractWords(reqRaw + " " + respRaw)
+	base := extractWords(jsonString(a.hydratePayloadMap(parseJSONMap(reqRaw))) + " " + jsonString(a.hydratePayloadMap(parseJSONMap(respRaw))))
 	checkerRows, _ := a.db.Query(`SELECT raw_request, raw_response FROM flows WHERE checker = 1 ORDER BY created_at DESC LIMIT 1000`)
 	checkerSet := map[string]struct{}{}
 	if checkerRows != nil {
@@ -1444,7 +1528,7 @@ func (a *App) uniqueWords(w http.ResponseWriter, r *http.Request) {
 		for checkerRows.Next() {
 			var cr, cs string
 			if checkerRows.Scan(&cr, &cs) == nil {
-				for _, w := range extractWords(cr + " " + cs) {
+				for _, w := range extractWords(jsonString(a.hydratePayloadMap(parseJSONMap(cr))) + " " + jsonString(a.hydratePayloadMap(parseJSONMap(cs)))) {
 					checkerSet[w] = struct{}{}
 				}
 			}
@@ -1483,21 +1567,103 @@ func extractWords(src string) []string {
 
 func (a *App) flowGroups(w http.ResponseWriter, r *http.Request) {
 	top := min(200, max(1, parseInt(r.URL.Query().Get("top"), 20)))
-	rows, err := a.db.Query(`SELECT hash, COUNT(*) as cnt, MIN(id) as ex, MIN(created_at) as first_seen, MAX(created_at) as last_seen FROM flows GROUP BY hash ORDER BY cnt DESC LIMIT ?`, top)
+	rows, err := a.db.Query(`SELECT f.hash, COUNT(*) as cnt, MIN(f.created_at) as first_seen, MAX(f.created_at) as last_seen FROM flows f GROUP BY f.hash ORDER BY cnt DESC LIMIT ?`, top)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	defer rows.Close()
-	out := []map[string]any{}
+	out := []FlowGroupMeta{}
 	for rows.Next() {
-		var hash, ex, first, last string
+		var hash, first, last string
 		var cnt int
-		if rows.Scan(&hash, &cnt, &ex, &first, &last) == nil {
-			out = append(out, map[string]any{"hash": hash, "count": cnt, "example_flow_id": ex, "first_seen": first, "last_seen": last})
+		if rows.Scan(&hash, &cnt, &first, &last) == nil {
+			if meta, ok := a.flowGroupMeta(hash, cnt, first, last, true); ok {
+				out = append(out, meta)
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *App) flowGroupMeta(hash string, cnt int, first, last string, includeFlow bool) (FlowGroupMeta, bool) {
+	row := a.db.QueryRow(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows WHERE hash = ? ORDER BY created_at DESC LIMIT 1`, hash)
+	flow, err := scanFlowRow(row)
+	if err != nil {
+		return FlowGroupMeta{}, false
+	}
+	a.hydrateFlowPayloads(&flow)
+	a.enrichFlow(&flow)
+	var name string
+	var checker int
+	_ = a.db.QueryRow(`SELECT name, checker FROM flow_group_meta WHERE hash = ?`, hash).Scan(&name, &checker)
+	if name == "" {
+		name = flow.GroupName
+	}
+	meta := FlowGroupMeta{
+		Hash:          hash,
+		Name:          name,
+		Checker:       checker == 1,
+		Count:         cnt,
+		ExampleFlowID: flow.ID,
+		FirstSeen:     first,
+		LastSeen:      last,
+		Destination:   flow.Destination,
+		Method:        asString(flow.RawRequest["method"]),
+		URI:           asString(flow.RawRequest["uri"]),
+		ResponseCode:  flow.ResponseCode,
+		ServiceID:     flow.ServiceID,
+		Mirrored:      flow.Mirrored,
+	}
+	if meta.URI == "" {
+		meta.URI = asString(flow.RawRequest["url"])
+	}
+	if includeFlow {
+		meta.LatestFlow = &flow
+	}
+	return meta, true
+}
+
+func (a *App) renameFlowGroup(w http.ResponseWriter, r *http.Request) {
+	hash := chi.URLParam(r, "hash")
+	var in struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+	name := strings.TrimSpace(in.Name)
+	_, err := a.db.Exec(`INSERT INTO flow_group_meta(hash, name, updated_at) VALUES (?, ?, ?) ON CONFLICT(hash) DO UPDATE SET name=excluded.name, updated_at=excluded.updated_at`, hash, name, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	_, _ = a.db.Exec(`UPDATE mirror_groups SET name = ? WHERE hash = ?`, name, hash)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (a *App) markFlowGroupChecker(w http.ResponseWriter, r *http.Request) {
+	hash := chi.URLParam(r, "hash")
+	var in struct {
+		Checker bool `json:"checker"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+	_, err := a.db.Exec(`INSERT INTO flow_group_meta(hash, checker, updated_at) VALUES (?, ?, ?) ON CONFLICT(hash) DO UPDATE SET checker=excluded.checker, updated_at=excluded.updated_at`, hash, boolInt(in.Checker), time.Now().UTC().Format(time.RFC3339))
+	if err == nil {
+		_, err = a.db.Exec(`UPDATE flows SET checker = ?, banned = CASE WHEN ? = 1 THEN 0 ELSE banned END WHERE hash = ?`, boolInt(in.Checker), boolInt(in.Checker), hash)
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if in.Checker {
+		a.recalculateAllFlowBans()
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (a *App) loadMirroring() {
@@ -1521,6 +1687,34 @@ func (a *App) getMirroring(w http.ResponseWriter, _ *http.Request) {
 	cfg := a.mirroring
 	a.mirrorMu.RUnlock()
 	writeJSON(w, http.StatusOK, cfg)
+}
+
+func (a *App) mirroredGroups(w http.ResponseWriter, _ *http.Request) {
+	rows, err := a.db.Query(`SELECT mg.hash, mg.service_id, COUNT(f.id), MIN(f.created_at), MAX(f.created_at) FROM mirror_groups mg LEFT JOIN flows f ON f.hash = mg.hash WHERE mg.enabled = 1 GROUP BY mg.hash, mg.service_id ORDER BY mg.service_id ASC, MAX(f.created_at) DESC`)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+	out := []FlowGroupMeta{}
+	for rows.Next() {
+		var hash string
+		var serviceID int
+		var cnt int
+		var first, last sql.NullString
+		if rows.Scan(&hash, &serviceID, &cnt, &first, &last) != nil {
+			continue
+		}
+		meta, ok := a.flowGroupMeta(hash, cnt, first.String, last.String, true)
+		if !ok {
+			continue
+		}
+		if meta.ServiceID == nil {
+			meta.ServiceID = intPtr(serviceID)
+		}
+		out = append(out, meta)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (a *App) setMirroring(w http.ResponseWriter, r *http.Request) {
@@ -1621,7 +1815,7 @@ func (a *App) runMirrorTick() {
 	}
 	now := time.Now()
 	for _, svc := range cfg.Services {
-		if !svc.Enabled || svc.ServiceID == 0 || len(svc.Targets) == 0 {
+		if svc.ServiceID == 0 || len(cfg.Targets) == 0 {
 			continue
 		}
 		interval := svc.IntervalSeconds
@@ -1632,11 +1826,11 @@ func (a *App) runMirrorTick() {
 			continue
 		}
 		a.mirrorDue[svc.ServiceID] = now.Add(time.Duration(interval) * time.Second)
-		go a.mirrorMarkedServiceGroups(svc)
+		go a.mirrorMarkedServiceGroups(svc, cfg.Targets)
 	}
 }
 
-func (a *App) mirrorMarkedServiceGroups(cfg ServiceMirrorConfig) {
+func (a *App) mirrorMarkedServiceGroups(cfg ServiceMirrorConfig, targets []MirrorTarget) {
 	rows, err := a.db.Query(`SELECT hash FROM mirror_groups WHERE service_id = ? AND enabled = 1`, cfg.ServiceID)
 	if err != nil {
 		log.Printf("mirror groups query error: %v", err)
@@ -1650,18 +1844,32 @@ func (a *App) mirrorMarkedServiceGroups(cfg ServiceMirrorConfig) {
 		}
 	}
 	_ = rows.Close()
+	servicePort := a.servicePort(cfg.ServiceID)
+	if servicePort < 1 {
+		return
+	}
 	for _, hash := range hashes {
 		row := a.db.QueryRow(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows WHERE hash = ? ORDER BY created_at DESC LIMIT 1`, hash)
 		flow, err := scanFlowRow(row)
 		if err != nil {
 			continue
 		}
+		a.hydrateFlowPayloads(&flow)
 		a.enrichFlow(&flow)
 		payload, _ := json.Marshal(map[string]any{"type": "flagmate_mirror", "service_id": cfg.ServiceID, "hash": hash, "flow": flow})
-		for _, target := range cfg.Targets {
+		for _, target := range targets {
+			target.Port = servicePort
 			a.sendMirrorPayload(target, string(payload)+"\n")
 		}
 	}
+}
+
+func (a *App) servicePort(serviceID int) int {
+	var port int
+	if err := a.db.QueryRow(`SELECT port FROM services WHERE id = ?`, serviceID).Scan(&port); err != nil {
+		return 0
+	}
+	return port
 }
 
 func (a *App) sendMirrorPayload(target MirrorTarget, payload string) {

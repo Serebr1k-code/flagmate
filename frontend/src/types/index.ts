@@ -14,6 +14,8 @@ export interface Flow {
   checker: boolean
   banned: boolean
   mirrored: boolean
+  group_name: string
+  group_count: number
   response_code: number
   flow_id: number
   src_ip: string
@@ -48,10 +50,19 @@ export interface Pattern {
 
 export interface FlowGroup {
   hash: string
+  name: string
+  checker: boolean
   count: number
   example_flow_id: string
   first_seen: string
   last_seen: string
+  destination: string
+  method: string
+  uri: string
+  response_code: number
+  service_id: number | null
+  mirrored: boolean
+  latest_flow?: Flow
 }
 
 export interface MirroringConfig {
