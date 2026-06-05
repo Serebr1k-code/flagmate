@@ -45,6 +45,11 @@
               {{ word }}
             </span>
           </div>
+          <div class="impact-row">
+            <span>groups: {{ impact.groups }}</span>
+            <span>flows: {{ impact.flows }}</span>
+            <span>checkers: {{ impact.checkers }}</span>
+          </div>
         </div>
 
         <div v-if="payloadHints.length > 0" class="words-section payload-section">
@@ -120,7 +125,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
+import api from '@/utils/api'
 import type { Flow } from '@/types'
 
 const props = defineProps<{ flow: Flow | null; uniqueWords: string[] }>()
@@ -132,6 +138,8 @@ const emit = defineEmits<{ close: []; banWords: [rules: BanCandidate[]] }>()
 const selectedWords = ref(new Set<string>())
 const customWord = ref('')
 const customMode = ref<BanMode>('B')
+const impact = ref({ groups: 0, flows: 0, checkers: 0 })
+let impactTimer: ReturnType<typeof setTimeout> | null = null
 
 const pathWords = computed(() => {
   const uri = String(props.flow?.raw_request?.uri || props.flow?.raw_request?.url || '')
@@ -280,6 +288,22 @@ function modeLabel(mode: BanMode) {
   if (mode === 'S') return 'response'
   return 'both'
 }
+
+watch(selectedItems, () => {
+  if (impactTimer) clearTimeout(impactTimer)
+  impactTimer = setTimeout(fetchImpact, 250)
+})
+
+async function fetchImpact() {
+  if (!props.flow || selectedItems.value.length === 0) {
+    impact.value = { groups: 0, flows: 0, checkers: 0 }
+    return
+  }
+  try {
+    const { data } = await api.post('/patterns/preview', { service_id: props.flow.service_id, rules: selectedItems.value })
+    impact.value = { groups: data.groups || 0, flows: data.flows || 0, checkers: data.checkers || 0 }
+  } catch (e) { console.error('Failed to preview ban impact:', e) }
+}
 </script>
 
 <style scoped>
@@ -305,6 +329,8 @@ function modeLabel(mode: BanMode) {
 .response-chip { background-color: rgba(16, 185, 129, 0.14); border-color: rgba(16, 185, 129, 0.55); color: #6ee7b7; font-weight: 600; }
 .response-chip.selected { background-color: #059669; border-color: #6ee7b7; color: #fff; }
 .word-chip small { margin-left: 6px; opacity: 0.75; font-size: 11px; }
+.impact-row { display: flex; gap: 12px; margin-top: 10px; color: var(--text-muted); font-size: 12px; }
+.impact-row span { padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); }
 .empty-state { padding: 16px; text-align: center; color: var(--text-muted); font-size: 14px; }
 .dialog-footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border); }
 .mono { font-family: 'JetBrains Mono', monospace; }

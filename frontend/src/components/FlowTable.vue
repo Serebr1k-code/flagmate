@@ -43,7 +43,6 @@
             </th>
             <th v-if="!selectedFlow">Time</th>
             <th>Direction</th>
-            <th v-if="!selectedFlow">Proto</th>
             <th v-if="!selectedFlow">Status</th>
             <th v-if="!selectedFlow">Response</th>
             <th v-if="!selectedFlow">Actions</th>
@@ -61,11 +60,11 @@
               </td>
               <td v-if="!selectedFlow" class="text-muted">{{ formatTime(flow.created_at) }}</td>
               <td>{{ displayDirection(flow) }}</td>
-              <td v-if="!selectedFlow"><span class="badge badge-outline">{{ flow.proto }}</span></td>
               <td v-if="!selectedFlow">
                 <span class="badge" :class="flow.stability_pct >= 70 ? 'badge-success' : 'badge-warning'">{{ stabilityLabel(flow) }}</span>
                 <span v-if="flow.group_count > 1" class="badge badge-outline">{{ flow.group_count }}x</span>
                 <span v-if="flow.checker" class="badge badge-primary">Checker</span>
+                <span v-else-if="isProbablyChecker(flow)" class="badge badge-success">Probably checker</span>
                 <span v-if="flow.banned" class="badge badge-destructive">Banned</span>
                 <span v-for="mark in flow.marks || []" :key="mark.id" class="badge mark-badge" :style="markStyle(mark.color)">{{ mark.name || mark.regex }}</span>
               </td>
@@ -83,7 +82,7 @@
               </td>
             </tr>
             <tr v-if="collapseDuplicates && flow.group_count > 1" class="expand-row" @click.stop="toggleExpanded(flow)">
-              <td :colspan="selectedFlow ? 1 : 7">
+              <td :colspan="selectedFlow ? 1 : 6">
                 <span>{{ expandedHashes.has(flow.hash) ? '▴ collapse repeated streams' : `▾ ${flow.group_count - 1} repeated streams` }}</span>
               </td>
             </tr>
@@ -98,9 +97,10 @@
                 <td v-if="!selectedFlow" @click.stop></td>
                 <td v-if="!selectedFlow" class="text-muted">{{ formatTime(item.created_at) }}</td>
                 <td>{{ displayDirection(item) }}</td>
-                <td v-if="!selectedFlow"><span class="badge badge-outline">{{ item.proto }}</span></td>
                 <td v-if="!selectedFlow">
                   <span class="badge" :class="item.stability_pct >= 70 ? 'badge-success' : 'badge-warning'">{{ stabilityLabel(item) }}</span>
+                  <span v-if="item.checker" class="badge badge-primary">Checker</span>
+                  <span v-else-if="isProbablyChecker(item)" class="badge badge-success">Probably checker</span>
                   <span v-for="mark in item.marks || []" :key="mark.id" class="badge mark-badge" :style="markStyle(mark.color)">{{ mark.name || mark.regex }}</span>
                 </td>
                 <td v-if="!selectedFlow"><span class="badge" :class="isPositiveResponse(item.response_code) ? 'badge-success' : 'badge-warning'">{{ item.response_code }}</span></td>
@@ -117,7 +117,7 @@
             </template>
           </template>
           <tr v-if="flows.length === 0">
-            <td :colspan="selectedFlow ? 1 : 7" class="empty-state">No flows captured yet</td>
+            <td :colspan="selectedFlow ? 1 : 6" class="empty-state">No flows captured yet</td>
           </tr>
         </tbody>
       </table>
@@ -333,6 +333,10 @@ function stabilityLabel(flow: Flow) {
 
 function isPositiveResponse(code: number) {
   return code === 101 || (code >= 200 && code < 400)
+}
+
+function isProbablyChecker(flow: Flow) {
+  return !flow.banned && !flow.checker && (flow.group_count || 0) >= 5 && (flow.stability_pct || 0) >= 70 && (flow.marks || []).length === 0
 }
 
 function markStyle(color: string) {

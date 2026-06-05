@@ -76,11 +76,11 @@
             </div>
             <div v-if="hasRequest(item)" class="transcript-block block-incoming">
               <div class="block-header"><span>client -> service</span></div>
-              <pre class="block-payload" v-html="highlightMarks(formatRequestPayload(item.raw_request, item.marks || []), item.marks || [])"></pre>
+              <pre class="block-payload" v-html="highlightPayload(formatRequestPayload(item.raw_request, item.marks || []), item.marks || [])"></pre>
             </div>
             <div v-if="hasResponse(item)" class="transcript-block block-outgoing" :class="{ 'negative-response': !item.banned && !isPositiveResponse(item.response_code) }">
               <div class="block-header"><span>service -> client</span></div>
-              <pre class="block-payload" v-html="highlightMarks(formatResponsePayload(item.raw_response, item.response_code, item.marks || []), item.marks || [])"></pre>
+              <pre class="block-payload" v-html="highlightPayload(formatResponsePayload(item.raw_response, item.response_code, item.marks || []), item.marks || [])"></pre>
             </div>
             <div v-if="!hasRequest(item) && !hasResponse(item)" class="empty-state">No payload captured for flow {{ item.id }}</div>
           </div>
@@ -147,7 +147,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import api from '@/utils/api'
 import type { Flow, MarkHit, Pattern } from '@/types'
 
@@ -306,8 +306,8 @@ function preserveMarkText(raw: string, formatted: string, marks: MarkHit[]) {
   return formatted
 }
 
-function highlightMarks(text: string, marks: MarkHit[]): string {
-  if (!marks.length || !text) return escapeHTML(text)
+function highlightPayload(text: string, marks: MarkHit[]): string {
+  if (!text) return ''
   const ranges: Array<{ start: number; end: number; color: string }> = []
   for (const mark of marks) {
     try {
@@ -317,6 +317,14 @@ function highlightMarks(text: string, marks: MarkHit[]): string {
         ranges.push({ start: match.index, end: match.index + match[0].length, color: mark.color })
       }
     } catch {}
+  }
+  for (const token of variableTokens.value) {
+    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const re = new RegExp(escaped, 'g')
+    for (const match of text.matchAll(re)) {
+      if (match.index === undefined) continue
+      ranges.push({ start: match.index, end: match.index + token.length, color: '#a855f7' })
+    }
   }
   if (!ranges.length) return escapeHTML(text)
   ranges.sort((a, b) => a.start - b.start || b.end - a.end)
@@ -335,6 +343,21 @@ function highlightMarks(text: string, marks: MarkHit[]): string {
   }
   out += escapeHTML(text.slice(cursor))
   return out
+}
+
+const variableTokens = computed(() => {
+  if (!showHistory.value || flowHistory.value.length < 2) return new Set<string>()
+  const freq = new Map<string, number>()
+  for (const flow of flowHistory.value) {
+    const text = `${formatRequestPayload(flow.raw_request, flow.marks || [])}\n${formatResponsePayload(flow.raw_response, flow.response_code, flow.marks || [])}`
+    const tokens = new Set((text.match(/[A-Za-z0-9_+\-=./]{4,80}/g) || []).filter(isDiffToken))
+    for (const token of tokens) freq.set(token, (freq.get(token) || 0) + 1)
+  }
+  return new Set(Array.from(freq.entries()).filter(([, count]) => count > 0 && count < flowHistory.value.length).map(([token]) => token))
+})
+
+function isDiffToken(token: string) {
+  return /\d/.test(token) || token.length >= 12 || /[+=/_-]/.test(token)
 }
 
 function escapeHTML(value: string) {

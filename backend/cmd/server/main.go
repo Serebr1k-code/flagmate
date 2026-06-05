@@ -250,6 +250,7 @@ func main() {
 
 		pr.Get("/patterns", app.listPatterns)
 		pr.Post("/patterns", app.createPattern)
+		pr.Post("/patterns/preview", app.previewPatterns)
 		pr.Delete("/patterns/{id}", app.deletePattern)
 		pr.Post("/patterns/{id}/toggle", app.togglePattern)
 
@@ -1438,6 +1439,76 @@ func (a *App) createPattern(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "ok"})
 }
 
+func (a *App) previewPatterns(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		ServiceID *int `json:"service_id"`
+		Rules     []struct {
+			Pattern string `json:"pattern"`
+			Mode    string `json:"mode"`
+		} `json:"rules"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+	rows, err := a.db.Query(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows ORDER BY created_at DESC LIMIT 10000`)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+	flows := 0
+	checkers := 0
+	groups := map[string]struct{}{}
+	services := map[int]struct{}{}
+	for rows.Next() {
+		flow, err := scanFlow(rows)
+		if err != nil {
+			continue
+		}
+		if in.ServiceID != nil && (flow.ServiceID == nil || *flow.ServiceID != *in.ServiceID) {
+			continue
+		}
+		a.hydrateFlowPayloads(&flow)
+		if previewMatches(flow, in.Rules) {
+			flows++
+			groups[flow.Hash] = struct{}{}
+			if flow.Checker {
+				checkers++
+			}
+			if flow.ServiceID != nil {
+				services[*flow.ServiceID] = struct{}{}
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"flows": flows, "groups": len(groups), "checkers": checkers, "services": len(services)})
+}
+
+func previewMatches(flow Flow, rules []struct {
+	Pattern string `json:"pattern"`
+	Mode    string `json:"mode"`
+}) bool {
+	reqText := strings.ToLower(jsonString(flow.RawRequest))
+	respText := strings.ToLower(jsonString(flow.RawResponse) + " " + strconv.Itoa(flow.ResponseCode))
+	for _, rule := range rules {
+		pattern := strings.ToLower(strings.TrimSpace(rule.Pattern))
+		if pattern == "" {
+			continue
+		}
+		target := reqText + " " + respText
+		switch strings.ToUpper(rule.Mode) {
+		case "C":
+			target = reqText
+		case "S":
+			target = respText
+		}
+		if patternMatch(pattern, target) {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) deletePattern(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	_, err := a.db.Exec(`DELETE FROM patterns WHERE id = ?`, id)
@@ -1636,8 +1707,8 @@ func (a *App) loadDefaultMarks(w http.ResponseWriter, _ *http.Request) {
 		{Name: "command injection", Regex: `(?i)(?:;|\|\||&&|\$\(|` + "`" + `)\s*(?:cat|curl|wget|bash|sh|nc|python|perl|php|id|whoami)\b`, Color: "#dc2626"},
 		{Name: "path traversal", Regex: `(?i)(?:\.\./){2,}|(?:%2e%2e%2f){2,}|/etc/(?:passwd|shadow|hosts)`, Color: "#fb7185"},
 		{Name: "ssrf", Regex: `(?i)(?:http://|https://)(?:127\.0\.0\.1|localhost|0\.0\.0\.0|169\.254\.169\.254|10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.)`, Color: "#06b6d4"},
-		{Name: "xss", Regex: `(?i)<\s*(?:script|img|svg|iframe|object)\b|javascript\s*:|onerror\s*=|onload\s*=`, Color: "#a855f7"},
-		{Name: "deserialization", Regex: `(?i)(?:\bO:\d+:"|\bacED\x00\x05|rO0AB|__reduce__|pickle|ysoserial)`, Color: "#8b5cf6"},
+		{Name: "xss", Regex: `(?i)<\s*(?:script|img|svg|iframe|object)\b|javascript\s*:|onerror\s*=|onload\s*=`, Color: "#14b8a6"},
+		{Name: "deserialization", Regex: `(?i)(?:\bO:\d+:"|\bacED\x00\x05|rO0AB|__reduce__|pickle|ysoserial)`, Color: "#0ea5e9"},
 		{Name: "template injection", Regex: `(?i)(?:\{\{\s*[^}]*\}\}|\$\{\s*[^}]*\}|<%=?\s*[^%]*%>)`, Color: "#eab308"},
 		{Name: "file upload shell", Regex: `(?i)(?:filename=\"?[^\";]*(?:\.php|\.phtml|\.jsp|\.aspx|\.sh)\b|Content-Type:\s*(?:application/x-php|text/x-php))`, Color: "#ec4899"},
 		{Name: "webshell", Regex: `(?i)(?:cmd=|exec=|system\s*\(|passthru\s*\(|shell_exec\s*\(|eval\s*\(|assert\s*\()`, Color: "#ef4444"},
