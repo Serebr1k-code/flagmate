@@ -39,7 +39,7 @@
               v-for="word in pathWords"
               :key="word"
               class="word-chip path-chip"
-              :class="{ selected: isSelected(word, 'C') }"
+              :class="{ selected: isSelectedPattern(word) }"
               @click="toggleWord(word, 'C')"
             >
               {{ word }}
@@ -54,7 +54,7 @@
               v-for="hint in payloadHints"
               :key="hint.pattern + hint.mode"
               class="word-chip payload-chip"
-              :class="{ selected: isSelected(hint.pattern, hint.mode) }"
+              :class="{ selected: isSelectedPattern(hint.pattern) }"
               @click="toggleWord(hint.pattern, hint.mode)"
             >
               {{ hint.label }}
@@ -69,7 +69,7 @@
               v-for="hint in responseHints"
               :key="hint.pattern + hint.mode"
               class="word-chip response-chip"
-              :class="{ selected: isSelected(hint.pattern, hint.mode) }"
+              :class="{ selected: isSelectedPattern(hint.pattern) }"
               @click="toggleWord(hint.pattern, hint.mode)"
             >
               {{ hint.label }}
@@ -85,7 +85,7 @@
               :key="hint.pattern + hint.mode + hint.label"
               class="word-chip marker-chip"
               :style="markerStyle(hint)"
-              :class="{ selected: isSelected(hint.pattern, hint.mode) }"
+              :class="{ selected: isSelectedPattern(hint.pattern) }"
               @mouseenter="showHint($event, hint.label || '')"
               @mousemove="moveHint($event)"
               @mouseleave="hideHint"
@@ -103,7 +103,7 @@
               v-for="word in nonPathWords"
               :key="word"
               class="word-chip"
-              :class="{ selected: isSelected(word, 'B') }"
+              :class="{ selected: isSelectedPattern(word) }"
               @click="toggleWord(word, 'B')"
             >
               {{ word }}
@@ -247,8 +247,8 @@ function parseKey(key: string) {
   return { key, mode, pattern }
 }
 
-function isSelected(pattern: string, mode: BanMode) {
-  return selectedWords.value.has(keyFor(pattern, mode))
+function isSelectedPattern(pattern: string) {
+  return Array.from(selectedWords.value).some(key => key.slice(2) === pattern)
 }
 
 function toggleWord(word: string, mode: BanMode) {
@@ -256,6 +256,9 @@ function toggleWord(word: string, mode: BanMode) {
   if (selectedWords.value.has(key)) {
     selectedWords.value.delete(key)
   } else {
+    for (const existing of Array.from(selectedWords.value)) {
+      if (existing.slice(2) === word) selectedWords.value.delete(existing)
+    }
     selectedWords.value.add(key)
   }
   selectedWords.value = new Set(selectedWords.value)
@@ -373,7 +376,7 @@ async function fetchImpact() {
 }
 
 function markerStyle(hint: BanCandidate) {
-  const selected = isSelected(hint.pattern, hint.mode)
+  const selected = isSelectedPattern(hint.pattern)
   const color = hint.color || '#ef4444'
   return { borderColor: color, backgroundColor: selected ? `${color}66` : `${color}22`, color }
 }

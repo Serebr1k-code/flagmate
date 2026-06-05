@@ -67,10 +67,6 @@
           </div>
         </div>
 
-        <div class="block-jump">
-          <input v-model="jumpTarget" class="jump-input" placeholder="#" @change="jumpToBlock" @keydown.enter="jumpToBlock" />
-        </div>
-
         <div v-if="loading" class="empty-state">Loading flow history...</div>
         <div v-else class="transcript">
           <template v-for="(entry, idx) in displayedHistory" :key="entry.flow.id">
@@ -179,7 +175,6 @@ const pageSize = 100
 const showUnbanConfirm = ref(false)
 const showCheckerConfirm = ref(false)
 const matchingPatterns = ref<Pattern[]>([])
-const jumpTarget = ref('')
 
 const displayedHistory = computed(() => {
   const out: Array<{ flow: Flow; hiddenCount: number }> = []
@@ -246,12 +241,6 @@ function onPanelScroll(event: Event) {
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 320) {
     fetchFlowHistory(false)
   }
-}
-
-function jumpToBlock() {
-  const n = Number(jumpTarget.value)
-  if (!Number.isFinite(n) || n < 1) return
-  document.getElementById(`flow-block-${n}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 function similarShape(a: Flow, b: Flow) {
@@ -586,8 +575,6 @@ async function confirmUnbanFlow() {
 .summary-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .variable-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .variable-chip { padding: 3px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-muted); background: var(--surface); font-size: 11px; font-family: 'JetBrains Mono', monospace; }
-.block-jump { position: sticky; top: 150px; z-index: 8; display: flex; justify-content: flex-end; pointer-events: none; height: 0; }
-.jump-input { width: 46px; height: 24px; pointer-events: auto; border: 1px solid var(--border); border-radius: 999px; background: color-mix(in srgb, var(--card) 88%, transparent); color: var(--text); text-align: center; font-size: 12px; outline: none; }
 .transcript { margin-bottom: 16px; display: flex; flex-direction: column; gap: 10px; }
 .flow-occurrence { border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: color-mix(in srgb, var(--surface) 70%, transparent); }
 .occurrence-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
@@ -598,7 +585,7 @@ async function confirmUnbanFlow() {
 .block-header { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: rgba(255,255,255,0.08); flex-wrap: wrap; border-bottom: 1px solid rgba(255,255,255,0.1); }
 .block-time { font-size: 13px; color: #ccc; margin-right: auto; font-weight: 600; }
 .block-payload { padding: 14px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; line-height: 1.6; overflow: visible; white-space: pre-wrap; word-break: break-word; display: block; min-height: 50px; color: #eee; width: 100%; box-sizing: border-box; }
-.frame-list { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 10px; }
+.frame-list { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 10px; }
 .frame-row { border: 1px solid var(--border); border-radius: 8px; padding: 8px; background: var(--card); }
 .frame-row b { display: block; margin-bottom: 6px; font-size: 12px; color: var(--text-muted); }
 .frame-row pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
