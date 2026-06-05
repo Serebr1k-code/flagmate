@@ -221,6 +221,7 @@ func main() {
 		poisonHits: map[string][]time.Time{},
 		mirrorDue:  map[int]time.Time{},
 	}
+	app.migrateFlowHashes()
 	app.loadMirroring()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -376,6 +377,54 @@ func initSchema(db *sql.DB) error {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_mirror_attempts_group ON mirror_attempts(hash, target_ip, created_at DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_mirror_attempts_created ON mirror_attempts(created_at DESC)`)
 	return nil
+}
+
+func (a *App) migrateFlowHashes() {
+	var version string
+	_ = a.db.QueryRow(`SELECT value FROM settings WHERE key = 'flow_hash_version'`).Scan(&version)
+	if version == "2" {
+		return
+	}
+	log.Printf("migrating flow hashes to strict shape version")
+	rows, err := a.db.Query(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows`)
+	if err != nil {
+		log.Printf("flow hash migration query error: %v", err)
+		return
+	}
+	defer rows.Close()
+	tx, err := a.db.Begin()
+	if err != nil {
+		log.Printf("flow hash migration tx error: %v", err)
+		return
+	}
+	defer tx.Rollback()
+	updated := 0
+	for rows.Next() {
+		flow, err := scanFlow(rows)
+		if err != nil {
+			continue
+		}
+		a.hydrateFlowPayloads(&flow)
+		serviceID := 0
+		if flow.ServiceID != nil {
+			serviceID = *flow.ServiceID
+		}
+		newHash := flowHash(flow.RawRequest, flow.RawResponse, serviceID)
+		if newHash == flow.Hash {
+			continue
+		}
+		if _, err := tx.Exec(`UPDATE flows SET hash = ? WHERE id = ?`, newHash, flow.ID); err == nil {
+			updated++
+		}
+	}
+	_, _ = tx.Exec(`DELETE FROM flow_group_meta`)
+	_, _ = tx.Exec(`DELETE FROM mirror_groups`)
+	_, _ = tx.Exec(`INSERT INTO settings(key,value) VALUES ('flow_hash_version','2') ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+	if err := tx.Commit(); err != nil {
+		log.Printf("flow hash migration commit error: %v", err)
+		return
+	}
+	log.Printf("flow hash migration updated %d flows", updated)
 }
 
 func (a *App) login(w http.ResponseWriter, r *http.Request) {
