@@ -88,7 +88,6 @@
             No payload data captured
           </div>
           <div v-if="loadingMore" class="empty-state">Loading more...</div>
-          <div v-else-if="!hasMore && flowHistory.length > 0" class="end-state">End of loaded history</div>
         </div>
 
         <div class="dialog-footer">
@@ -421,7 +420,6 @@ async function confirmUnbanFlow() {
 .block-payload { padding: 14px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; line-height: 1.6; overflow: visible; white-space: pre-wrap; word-break: break-word; display: block; min-height: 50px; color: #eee; width: 100%; box-sizing: border-box; }
 .code-block { background-color: var(--surface); color: var(--text); }
 .empty-state { text-align: center; padding: 32px; color: var(--text-muted); }
-.end-state { text-align: center; padding: 12px; color: var(--text-muted); font-size: 12px; }
 .dialog-footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border); }
 .label { font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
 .mono { font-family: 'JetBrains Mono', monospace; }
