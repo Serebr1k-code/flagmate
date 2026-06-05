@@ -1101,8 +1101,8 @@ func (a *App) isBanned(req, resp map[string]any, status int, serviceID int) bool
 	}
 	defer rows.Close()
 
-	reqText := strings.ToLower(jsonString(req))
-	respText := strings.ToLower(jsonString(resp) + " " + strconv.Itoa(status))
+	reqText := strings.ToLower(flowMatchText(req, 0))
+	respText := strings.ToLower(flowMatchText(resp, status) + " " + strconv.Itoa(status))
 	matchedIDs := []int{}
 
 	for rows.Next() {
@@ -1137,7 +1137,38 @@ func patternMatch(pattern, target string) bool {
 	if err == nil {
 		return re.MatchString(target)
 	}
-	return strings.Contains(target, pattern)
+	return strings.Contains(target, pattern) || strings.Contains(normalizeWhitespace(target), normalizeWhitespace(pattern))
+}
+
+func normalizeWhitespace(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+func flowMatchText(raw map[string]any, status int) string {
+	parts := []string{jsonString(raw)}
+	if enc, err := json.MarshalIndent(raw, "", "  "); err == nil {
+		parts = append(parts, string(enc))
+	}
+	if body := asString(raw["body"]); body != "" {
+		parts = append(parts, body)
+		if pretty, ok := prettyJSON(body); ok {
+			parts = append(parts, pretty)
+		}
+	}
+	if status > 0 {
+		parts = append(parts, strconv.Itoa(status))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func prettyJSON(body string) (string, bool) {
+	var v any
+	if err := json.Unmarshal([]byte(body), &v); err != nil {
+		return "", false
+	}
+	enc, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return "", false
+	}
+	return string(enc), true
 }
 
 func (a *App) insertFlow(f Flow) error {
@@ -1551,8 +1582,8 @@ func previewMatches(flow Flow, rules []struct {
 	Pattern string `json:"pattern"`
 	Mode    string `json:"mode"`
 }) bool {
-	reqText := strings.ToLower(jsonString(flow.RawRequest))
-	respText := strings.ToLower(jsonString(flow.RawResponse) + " " + strconv.Itoa(flow.ResponseCode))
+	reqText := strings.ToLower(flowMatchText(flow.RawRequest, 0))
+	respText := strings.ToLower(flowMatchText(flow.RawResponse, flow.ResponseCode) + " " + strconv.Itoa(flow.ResponseCode))
 	for _, rule := range rules {
 		pattern := strings.ToLower(strings.TrimSpace(rule.Pattern))
 		if pattern == "" {
@@ -2030,8 +2061,8 @@ func (a *App) matchingPatterns(flow Flow) []Pattern {
 		return []Pattern{}
 	}
 	defer rows.Close()
-	reqText := strings.ToLower(jsonString(flow.RawRequest))
-	respText := strings.ToLower(jsonString(flow.RawResponse) + " " + strconv.Itoa(flow.ResponseCode))
+	reqText := strings.ToLower(flowMatchText(flow.RawRequest, 0))
+	respText := strings.ToLower(flowMatchText(flow.RawResponse, flow.ResponseCode) + " " + strconv.Itoa(flow.ResponseCode))
 	out := []Pattern{}
 	for rows.Next() {
 		var p Pattern

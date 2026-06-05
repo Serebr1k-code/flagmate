@@ -82,6 +82,23 @@
           </div>
         </div>
 
+        <div v-if="markerHints.length > 0" class="words-section marker-section">
+          <h3>Marked snippets</h3>
+          <div class="word-chips">
+            <span
+              v-for="hint in markerHints"
+              :key="hint.pattern + hint.mode + hint.label"
+              class="word-chip marker-chip"
+              :style="{ borderColor: hint.color, backgroundColor: `${hint.color}22`, color: hint.color }"
+              :class="{ selected: isSelected(hint.pattern, hint.mode) }"
+              :title="hint.label"
+              @click="toggleWord(hint.pattern, hint.mode)"
+            >
+              {{ hint.pattern }}
+            </span>
+          </div>
+        </div>
+
         <div class="words-section">
           <h3>Other unique words (not in checker flows)</h3>
           <div class="word-chips">
@@ -131,7 +148,7 @@ import type { Flow } from '@/types'
 
 const props = defineProps<{ flow: Flow | null; uniqueWords: string[]; initialSelection?: string }>()
 type BanMode = 'B' | 'C' | 'S'
-type BanCandidate = { pattern: string; mode: BanMode; label?: string }
+type BanCandidate = { pattern: string; mode: BanMode; label?: string; color?: string }
 
 const emit = defineEmits<{ close: []; banWords: [rules: BanCandidate[]] }>()
 
@@ -190,6 +207,23 @@ const responseHints = computed<BanCandidate[]>(() => {
     }
   }
   collectSuspicious(hints, flow.raw_response?.body, 'response', 'S')
+  return uniqueCandidates(hints).slice(0, 30)
+})
+
+const markerHints = computed<BanCandidate[]>(() => {
+  const flow = props.flow
+  if (!flow?.marks?.length) return []
+  const text = `${valueToString(flow.raw_request)}\n${valueToString(flow.raw_response)}`
+  const hints: BanCandidate[] = []
+  for (const mark of flow.marks) {
+    try {
+      const re = compileMarkRegex(mark.regex)
+      for (const match of text.matchAll(re)) {
+        if (!match[0] || match[0].length > 160) continue
+        hints.push({ pattern: match[0], mode: 'B', label: mark.name || mark.regex, color: mark.color })
+      }
+    } catch {}
+  }
   return uniqueCandidates(hints).slice(0, 30)
 })
 
@@ -287,6 +321,16 @@ function modeLabel(mode: BanMode) {
   if (mode === 'C') return 'request'
   if (mode === 'S') return 'response'
   return 'both'
+}
+
+function compileMarkRegex(regex: string) {
+  let source = regex
+  let flags = 'g'
+  if (source.startsWith('(?i)')) {
+    source = source.slice(4)
+    flags += 'i'
+  }
+  return new RegExp(source, flags)
 }
 
 watch(selectedItems, () => {

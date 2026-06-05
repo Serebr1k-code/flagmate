@@ -470,6 +470,7 @@ onUnmounted(disconnectLiveSocket)
 .flow-actions-cell { min-width: 170px; }
 .flow-actions { display: flex; align-items: center; gap: 10px; }
 .table td .badge + .badge { margin-left: 4px; }
+.table td .badge { margin-bottom: 4px; }
 .mark-badge { border: 1px solid; }
 .mirror-btn { min-width: 76px; justify-content: center; }
 .flow-row:hover td { filter: brightness(1.05); }

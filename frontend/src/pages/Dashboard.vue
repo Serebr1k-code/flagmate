@@ -52,7 +52,7 @@
       :flow="wordPickerFlow"
       :unique-words="uniqueWords"
       :initial-selection="initialBanText"
-      @close="showWordPicker = false"
+      @close="closeWordPicker"
       @ban-words="onBanWords"
     />
   </div>
@@ -105,9 +105,17 @@ function switchTab(tabId: string) {
 
 function handleKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') {
+    if (showWordPicker.value) {
+      closeWordPicker()
+      return
+    }
     if (selectedFlow.value) selectedFlow.value = null
-    if (showWordPicker.value) showWordPicker.value = false
   }
+}
+
+function closeWordPicker() {
+  showWordPicker.value = false
+  initialBanText.value = ''
 }
 
 function onOpenFlow(flow: Flow) {
@@ -139,11 +147,15 @@ async function onBanClicked(flow: Flow) {
 
 async function onBanText(payload: { flow: Flow; text: string }) {
   initialBanText.value = payload.text
-  await onOpenWordPicker(payload.flow)
+  await openWordPicker(payload.flow)
 }
 
 async function onOpenWordPicker(flow: Flow) {
-  if (!initialBanText.value) initialBanText.value = ''
+  initialBanText.value = ''
+  await openWordPicker(flow)
+}
+
+async function openWordPicker(flow: Flow) {
   try {
     const { data } = await api.get(`/flows/${flow.id}/unique-words`)
     uniqueWords.value = data.words || []
