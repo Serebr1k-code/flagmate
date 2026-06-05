@@ -1135,7 +1135,9 @@ func (a *App) isBanned(req, resp map[string]any, status int, serviceID int) bool
 func patternMatch(pattern, target string) bool {
 	re, err := regexp.Compile(pattern)
 	if err == nil {
-		return re.MatchString(target)
+		if re.MatchString(target) {
+			return true
+		}
 	}
 	return strings.Contains(target, pattern) || strings.Contains(normalizeWhitespace(target), normalizeWhitespace(pattern))
 }
@@ -1143,7 +1145,7 @@ func patternMatch(pattern, target string) bool {
 func normalizeWhitespace(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 func flowMatchText(raw map[string]any, status int) string {
-	parts := []string{jsonString(raw)}
+	parts := []string{jsonString(raw), httpLikeText(raw, status)}
 	if enc, err := json.MarshalIndent(raw, "", "  "); err == nil {
 		parts = append(parts, string(enc))
 	}
@@ -1157,6 +1159,60 @@ func flowMatchText(raw map[string]any, status int) string {
 		parts = append(parts, strconv.Itoa(status))
 	}
 	return strings.Join(parts, "\n")
+}
+
+func httpLikeText(raw map[string]any, status int) string {
+	lines := []string{}
+	if method := asString(raw["method"]); method != "" {
+		uri := asString(raw["uri"])
+		if uri == "" {
+			uri = asString(raw["url"])
+		}
+		query := asString(raw["query"])
+		if query != "" && !strings.Contains(uri, "?") {
+			uri += "?" + query
+		}
+		if uri == "" {
+			uri = "/"
+		}
+		lines = append(lines, fmt.Sprintf("%s %s HTTP", method, uri))
+	} else if status > 0 {
+		lines = append(lines, fmt.Sprintf("HTTP %d", status))
+	}
+	if headers, ok := raw["headers"].(map[string]any); ok {
+		keys := make([]string, 0, len(headers))
+		for key := range headers {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			lines = append(lines, fmt.Sprintf("%s: %s", key, headerValueString(headers[key])))
+		}
+	}
+	if query := asString(raw["query"]); query != "" {
+		lines = append(lines, "query: "+query)
+	}
+	if body := asString(raw["body"]); body != "" {
+		lines = append(lines, body)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func headerValueString(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case []string:
+		return strings.Join(t, ", ")
+	case []any:
+		parts := make([]string, 0, len(t))
+		for _, item := range t {
+			parts = append(parts, asString(item))
+		}
+		return strings.Join(parts, ", ")
+	default:
+		return asString(v)
+	}
 }
 
 func prettyJSON(body string) (string, bool) {
