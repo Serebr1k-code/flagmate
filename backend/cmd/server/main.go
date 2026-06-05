@@ -1433,7 +1433,7 @@ func (a *App) listFlows(w http.ResponseWriter, r *http.Request) {
 		query += ` WHERE ` + strings.Join(where, ` AND `)
 	}
 	if collapse && search == "" {
-		query += ` AND created_at = (SELECT MAX(f2.created_at) FROM flows f2 WHERE f2.hash = flows.hash)`
+		query += ` AND rowid = (SELECT f2.rowid FROM flows f2 WHERE f2.hash = flows.hash ORDER BY f2.created_at DESC, f2.rowid DESC LIMIT 1)`
 		if len(where) == 0 {
 			query = strings.Replace(query, ` FROM flows AND `, ` FROM flows WHERE `, 1)
 		}
