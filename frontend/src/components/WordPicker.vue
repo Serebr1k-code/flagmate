@@ -3,7 +3,7 @@
     <div class="dialog-overlay" @click.self="$emit('close')">
       <div class="dialog">
         <div class="dialog-header">
-          <h2 class="dialog-title">Ban Words from Flow</h2>
+          <h2 class="dialog-title">Ban</h2>
           <button class="dialog-close" @click="$emit('close')">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="18" y1="6" x2="6" y2="18"/>
@@ -24,6 +24,11 @@
             placeholder="Type custom word or regex..."
             @keydown.enter="addCustomWord"
           />
+          <select v-model="customMode" class="select mode-select">
+            <option value="B">request + response</option>
+            <option value="C">request only</option>
+            <option value="S">response only</option>
+          </select>
           <button class="btn btn-sm btn-outline" @click="addCustomWord">Add</button>
         </div>
 
@@ -34,23 +39,53 @@
               v-for="word in pathWords"
               :key="word"
               class="word-chip path-chip"
-              :class="{ selected: selectedWords.has(word) }"
-              @click="toggleWord(word)"
+              :class="{ selected: isSelected(word, 'C') }"
+              @click="toggleWord(word, 'C')"
             >
               {{ word }}
             </span>
           </div>
         </div>
 
+        <div v-if="payloadHints.length > 0" class="words-section payload-section">
+          <h3>Suspicious payload pieces / variables</h3>
+          <div class="word-chips">
+            <span
+              v-for="hint in payloadHints"
+              :key="hint.pattern + hint.mode"
+              class="word-chip payload-chip"
+              :class="{ selected: isSelected(hint.pattern, hint.mode) }"
+              @click="toggleWord(hint.pattern, hint.mode)"
+            >
+              {{ hint.label }}
+            </span>
+          </div>
+        </div>
+
+        <div v-if="responseHints.length > 0" class="words-section response-section">
+          <h3>Response shape</h3>
+          <div class="word-chips">
+            <span
+              v-for="hint in responseHints"
+              :key="hint.pattern + hint.mode"
+              class="word-chip response-chip"
+              :class="{ selected: isSelected(hint.pattern, hint.mode) }"
+              @click="toggleWord(hint.pattern, hint.mode)"
+            >
+              {{ hint.label }}
+            </span>
+          </div>
+        </div>
+
         <div class="words-section">
-          <h3>Unique words (not in checker flows)</h3>
+          <h3>Other unique words (not in checker flows)</h3>
           <div class="word-chips">
             <span
               v-for="word in nonPathWords"
               :key="word"
               class="word-chip"
-              :class="{ selected: selectedWords.has(word) }"
-              @click="toggleWord(word)"
+              :class="{ selected: isSelected(word, 'B') }"
+              @click="toggleWord(word, 'B')"
             >
               {{ word }}
             </span>
@@ -59,24 +94,24 @@
         </div>
 
         <div class="selected-section">
-          <h3>Selected for ban ({{ selectedWords.size }})</h3>
+          <h3>Selected for ban ({{ selectedItems.length }})</h3>
           <div class="word-chips">
             <span
-              v-for="word in Array.from(selectedWords)"
-              :key="word"
+              v-for="item in selectedItems"
+              :key="item.key"
               class="word-chip selected"
-              @click="toggleWord(word)"
+              @click="toggleWord(item.pattern, item.mode)"
             >
-              {{ word }} ×
+              {{ item.pattern }} <small>{{ modeLabel(item.mode) }}</small> ×
             </span>
-            <span v-if="selectedWords.size === 0" class="empty-state">No words selected</span>
+            <span v-if="selectedItems.length === 0" class="empty-state">No ban rules selected</span>
           </div>
         </div>
 
         <div class="dialog-footer">
           <button class="btn btn-outline" @click="$emit('close')">Cancel</button>
-          <button class="btn btn-destructive" :disabled="selectedWords.size === 0" @click="banWords">
-            Ban {{ selectedWords.size }} word(s)
+          <button class="btn btn-destructive" :disabled="selectedItems.length === 0" @click="banWords">
+            Ban {{ selectedItems.length }} rule(s)
           </button>
         </div>
       </div>
@@ -89,10 +124,14 @@ import { ref, computed } from 'vue'
 import type { Flow } from '@/types'
 
 const props = defineProps<{ flow: Flow | null; uniqueWords: string[] }>()
-const emit = defineEmits<{ close: []; banWords: [words: string[]] }>()
+type BanMode = 'B' | 'C' | 'S'
+type BanCandidate = { pattern: string; mode: BanMode; label?: string }
+
+const emit = defineEmits<{ close: []; banWords: [rules: BanCandidate[]] }>()
 
 const selectedWords = ref(new Set<string>())
 const customWord = ref('')
+const customMode = ref<BanMode>('B')
 
 const pathWords = computed(() => {
   const uri = String(props.flow?.raw_request?.uri || props.flow?.raw_request?.url || '')
@@ -112,28 +151,134 @@ const pathWords = computed(() => {
 
 const nonPathWords = computed(() => {
   const pathSet = new Set(pathWords.value)
-  return props.uniqueWords.filter(word => !pathSet.has(word))
+  const used = new Set([...pathWords.value, ...payloadHints.value.map(h => h.pattern), ...responseHints.value.map(h => h.pattern)])
+  return props.uniqueWords.filter(word => !pathSet.has(word) && !used.has(word))
 })
 
-function toggleWord(word: string) {
-  if (selectedWords.value.has(word)) {
-    selectedWords.value.delete(word)
+const payloadHints = computed<BanCandidate[]>(() => {
+  const flow = props.flow
+  if (!flow) return []
+  const hints: BanCandidate[] = []
+  collectSuspicious(hints, flow.raw_request?.query, 'query', 'C')
+  collectSuspicious(hints, flow.raw_request?.headers, 'header', 'C')
+  collectSuspicious(hints, flow.raw_request?.body, 'payload', 'C')
+  return uniqueCandidates(hints).slice(0, 30)
+})
+
+const responseHints = computed<BanCandidate[]>(() => {
+  const flow = props.flow
+  if (!flow) return []
+  const hints: BanCandidate[] = []
+  const status = Number(flow.raw_response?.status || flow.response_code || 0)
+  if (status) hints.push({ pattern: String(status), mode: 'S', label: `status ${status}` })
+  const headers = flow.raw_response?.headers
+  if (headers && typeof headers === 'object') {
+    for (const [key, value] of Object.entries(headers)) {
+      const text = valueToString(value)
+      const lower = key.toLowerCase()
+      if (['content-type', 'server', 'x-powered-by', 'location'].includes(lower) && text) {
+        hints.push({ pattern: text, mode: 'S', label: `${key}: ${shorten(text, 32)}` })
+      }
+    }
+  }
+  collectSuspicious(hints, flow.raw_response?.body, 'response', 'S')
+  return uniqueCandidates(hints).slice(0, 30)
+})
+
+const selectedItems = computed(() => Array.from(selectedWords.value).map(parseKey))
+
+function keyFor(pattern: string, mode: BanMode) {
+  return `${mode}:${pattern}`
+}
+
+function parseKey(key: string) {
+  const mode = key.slice(0, 1) as BanMode
+  const pattern = key.slice(2)
+  return { key, mode, pattern }
+}
+
+function isSelected(pattern: string, mode: BanMode) {
+  return selectedWords.value.has(keyFor(pattern, mode))
+}
+
+function toggleWord(word: string, mode: BanMode) {
+  const key = keyFor(word, mode)
+  if (selectedWords.value.has(key)) {
+    selectedWords.value.delete(key)
   } else {
-    selectedWords.value.add(word)
+    selectedWords.value.add(key)
   }
   selectedWords.value = new Set(selectedWords.value)
 }
 
 function addCustomWord() {
   if (!customWord.value.trim()) return
-  selectedWords.value.add(customWord.value.trim())
+  selectedWords.value.add(keyFor(customWord.value.trim(), customMode.value))
   selectedWords.value = new Set(selectedWords.value)
   customWord.value = ''
 }
 
 function banWords() {
-  emit('banWords', Array.from(selectedWords.value))
+  emit('banWords', selectedItems.value.map(item => ({ pattern: item.pattern, mode: item.mode })))
   selectedWords.value.clear()
+}
+
+function collectSuspicious(out: BanCandidate[], src: unknown, source: string, mode: BanMode) {
+  if (!src) return
+  if (typeof src === 'string') {
+    collectFromText(out, src, source, mode)
+    return
+  }
+  if (typeof src === 'object') {
+    for (const [key, value] of Object.entries(src as Record<string, unknown>)) {
+      const text = valueToString(value)
+      if (isSuspiciousKey(key)) out.push({ pattern: key, mode, label: `${source} key: ${key}` })
+      if (isSuspiciousValue(text)) out.push({ pattern: text, mode, label: `${key}=${shorten(text, 36)}` })
+      collectFromText(out, text, key, mode)
+    }
+  }
+}
+
+function collectFromText(out: BanCandidate[], text: string, source: string, mode: BanMode) {
+  const snippets = text.match(/[A-Za-z0-9_./?&=%:-]{6,96}/g) || []
+  for (const snippet of snippets) {
+    if (isSuspiciousValue(snippet)) out.push({ pattern: snippet, mode, label: `${source}: ${shorten(snippet, 42)}` })
+  }
+}
+
+function isSuspiciousKey(key: string) {
+  return /(flag|token|secret|pass|auth|cmd|exec|file|path|url|admin|debug|shell|sploit|payload)/i.test(key)
+}
+
+function isSuspiciousValue(value: string) {
+  if (!value || value.length < 6) return false
+  return value.length > 18 || /(flag|token|secret|pass|admin|cmd|exec|shell|sploit|payload|\.php|\.sh|\.py|\.env|\/etc\/|base64|select|union|script)/i.test(value) || /[?&=:%/]{2,}/.test(value)
+}
+
+function uniqueCandidates(items: BanCandidate[]) {
+  const seen = new Set<string>()
+  return items.filter(item => {
+    const key = keyFor(item.pattern, item.mode)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function valueToString(value: unknown): string {
+  if (Array.isArray(value)) return value.map(valueToString).join(', ')
+  if (value && typeof value === 'object') return JSON.stringify(value)
+  return String(value || '')
+}
+
+function shorten(value: string, max: number) {
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value
+}
+
+function modeLabel(mode: BanMode) {
+  if (mode === 'C') return 'request'
+  if (mode === 'S') return 'response'
+  return 'both'
 }
 </script>
 
@@ -155,9 +300,15 @@ function banWords() {
 .word-chip.selected { background-color: var(--destructive); color: var(--destructive-foreground); border-color: var(--destructive); }
 .path-chip { background-color: rgba(59, 130, 246, 0.16); border-color: rgba(59, 130, 246, 0.65); color: #93c5fd; font-weight: 600; }
 .path-chip.selected { background-color: #2563eb; border-color: #60a5fa; color: #fff; }
+.payload-chip { background-color: rgba(245, 158, 11, 0.14); border-color: rgba(245, 158, 11, 0.55); color: #fbbf24; font-weight: 600; }
+.payload-chip.selected { background-color: #d97706; border-color: #fbbf24; color: #fff; }
+.response-chip { background-color: rgba(16, 185, 129, 0.14); border-color: rgba(16, 185, 129, 0.55); color: #6ee7b7; font-weight: 600; }
+.response-chip.selected { background-color: #059669; border-color: #6ee7b7; color: #fff; }
+.word-chip small { margin-left: 6px; opacity: 0.75; font-size: 11px; }
 .empty-state { padding: 16px; text-align: center; color: var(--text-muted); font-size: 14px; }
 .dialog-footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border); }
 .mono { font-family: 'JetBrains Mono', monospace; }
 .label { font-size: 12px; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
 .flex-1 { flex: 1; }
+.mode-select { width: 170px; }
 </style>

@@ -143,18 +143,18 @@ async function onOpenWordPicker(flow: Flow) {
   showWordPicker.value = true
 }
 
-async function onBanWords(words: string[]) {
+async function onBanWords(rules: Array<{ pattern: string; mode: 'B' | 'C' | 'S' }>) {
   if (!wordPickerFlow.value) return
-  for (const word of words) {
+  for (const rule of rules) {
     try {
       await api.post('/patterns', {
         service_id: wordPickerFlow.value.service_id,
-        pattern: word,
+        pattern: rule.pattern,
         description: `Auto-banned from flow ${wordPickerFlow.value?.id.substring(0, 8)}`,
-        mode: 'B',
+        mode: rule.mode,
       })
     } catch (e) {
-      console.error(`Failed to ban word "${word}":`, e)
+      console.error(`Failed to ban rule "${rule.pattern}":`, e)
     }
   }
   showWordPicker.value = false
