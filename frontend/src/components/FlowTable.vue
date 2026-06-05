@@ -147,7 +147,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import api from '@/utils/api'
 import type { Flow, Service } from '@/types'
 
@@ -177,6 +177,9 @@ const showUnbanConfirm = ref(false)
 const pendingUnbanFlow = ref<Flow | null>(null)
 const pendingUnbanPatterns = ref<Array<{ id: number; pattern: string }>>([])
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
+let liveSocket: WebSocket | null = null
+let liveRefreshTimer: ReturnType<typeof setTimeout> | null = null
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
 const allSelected = computed(() => flows.value.length > 0 && selected.value.size === flows.value.length)
 
@@ -218,6 +221,40 @@ async function fetchFlows(reset = true) {
   } finally {
     loadingMore.value = false
   }
+}
+
+function scheduleLiveRefresh() {
+  if (liveRefreshTimer) return
+  liveRefreshTimer = setTimeout(() => {
+    liveRefreshTimer = null
+    fetchFlows(true)
+  }, 250)
+}
+
+function connectLiveSocket() {
+  if (liveSocket && (liveSocket.readyState === WebSocket.OPEN || liveSocket.readyState === WebSocket.CONNECTING)) return
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  liveSocket = new WebSocket(`${proto}://${window.location.host}/ws`)
+  liveSocket.onmessage = () => scheduleLiveRefresh()
+  liveSocket.onclose = () => {
+    liveSocket = null
+    if (!reconnectTimer) {
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null
+        connectLiveSocket()
+      }, 1500)
+    }
+  }
+  liveSocket.onerror = () => liveSocket?.close()
+}
+
+function disconnectLiveSocket() {
+  if (liveRefreshTimer) clearTimeout(liveRefreshTimer)
+  if (reconnectTimer) clearTimeout(reconnectTimer)
+  liveRefreshTimer = null
+  reconnectTimer = null
+  liveSocket?.close()
+  liveSocket = null
 }
 
 function toggleCollapseDuplicates() {
@@ -384,7 +421,10 @@ async function toggleMirror(flow: Flow) {
 onMounted(() => {
   fetchServices()
   fetchFlows(true)
+  connectLiveSocket()
 })
+
+onUnmounted(disconnectLiveSocket)
 </script>
 
 <style scoped>
