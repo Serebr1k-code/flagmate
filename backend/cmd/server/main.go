@@ -1762,7 +1762,7 @@ func markLabel(mark Mark) string {
 
 func (a *App) loadDefaultMarks(w http.ResponseWriter, _ *http.Request) {
 	defaults := []Mark{
-		{Name: "flag", Regex: `(?i)(?:[a-z0-9_]+\{[A-Za-z0-9_+\-=]{8,128}\}|\b[A-Za-z0-9_+\-=]{32}\b)`, Color: "#ef4444"},
+		{Name: "flag", Regex: `(?i)(?:[a-z0-9_]+\{[A-Za-z0-9_+\-=]{8,128}\}|\b[A-Za-z0-9_+\-=]{16}\b|\b[A-Za-z0-9_+\-=]{24}\b|\b[A-Za-z0-9_+\-=]{32}\b|\b[A-Za-z0-9_+\-=]{48}\b)`, Color: "#ef4444"},
 		{Name: "sql injection", Regex: `(?i)(?:\bunion\s+select\b|\bor\s+1\s*=\s*1\b|\bsleep\s*\(\s*\d+\s*\)|\binformation_schema\b|(?:--|#|/\*)\s*$)`, Color: "#f97316"},
 		{Name: "command injection", Regex: `(?i)(?:;|\|\||&&|\$\(|` + "`" + `)\s*(?:cat|curl|wget|bash|sh|nc|python|perl|php|id|whoami)\b`, Color: "#dc2626"},
 		{Name: "path traversal", Regex: `(?i)(?:\.\./){2,}|(?:%2e%2e%2f){2,}|/etc/(?:passwd|shadow|hosts)`, Color: "#fb7185"},
