@@ -1,5 +1,5 @@
 <template>
-  <section class="flow-detail-panel" @scroll="onPanelScroll" @mouseup="openBanForSelection">
+  <section class="flow-detail-panel" @scroll="onPanelScroll" @mouseup="openBanForSelection($event)">
         <div class="dialog-header">
           <h2 class="dialog-title">Flow Detail</h2>
           <span class="mono text-sm hash-label">{{ flow.hash.substring(0, 16) }}...</span>
@@ -216,7 +216,8 @@ function onPanelScroll(event: Event) {
   }
 }
 
-function openBanForSelection() {
+function openBanForSelection(event: MouseEvent) {
+  if (event.ctrlKey || event.metaKey) return
   const selection = window.getSelection()?.toString().trim()
   if (!selection || selection.length < 2) return
   emit('banText', { flow: props.flow, text: selection })

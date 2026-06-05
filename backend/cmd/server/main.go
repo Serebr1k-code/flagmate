@@ -1145,7 +1145,7 @@ func patternMatch(pattern, target string) bool {
 func normalizeWhitespace(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 func flowMatchText(raw map[string]any, status int) string {
-	parts := []string{jsonString(raw), httpLikeText(raw, status)}
+	parts := []string{jsonString(raw), httpLikeText(raw, status), renderedDetailText(raw, status)}
 	if enc, err := json.MarshalIndent(raw, "", "  "); err == nil {
 		parts = append(parts, string(enc))
 	}
@@ -1159,6 +1159,29 @@ func flowMatchText(raw map[string]any, status int) string {
 		parts = append(parts, strconv.Itoa(status))
 	}
 	return strings.Join(parts, "\n")
+}
+
+func renderedDetailText(raw map[string]any, status int) string {
+	lines := []string{httpLikeText(raw, status), "---"}
+	method := asString(raw["method"])
+	if method != "" {
+		lines = append(lines, "method: "+method)
+	}
+	if uri := asString(raw["uri"]); uri != "" {
+		lines = append(lines, "uri: "+uri)
+	}
+	if query := asString(raw["query"]); query != "" {
+		lines = append(lines, "query: "+query)
+	}
+	if status > 0 {
+		lines = append(lines, "status: "+strconv.Itoa(status))
+	}
+	if body := asString(raw["body"]); body != "" {
+		lines = append(lines, body)
+	} else if method != "" {
+		lines = append(lines, "payload: (empty)")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func httpLikeText(raw map[string]any, status int) string {
@@ -1344,6 +1367,11 @@ func (a *App) enrichFlow(f *Flow) {
 	f.Mirrored = a.isMirroredGroup(f.Hash)
 	f.GroupName = a.groupName(f.Hash)
 	_ = a.db.QueryRow(`SELECT COUNT(*) FROM flows WHERE hash = ?`, f.Hash).Scan(&f.GroupCount)
+	liveBanned := !f.Checker && len(a.matchingPatterns(*f)) > 0
+	if liveBanned != f.Banned {
+		f.Banned = liveBanned
+		_, _ = a.db.Exec(`UPDATE flows SET banned = ? WHERE id = ?`, boolInt(liveBanned), f.ID)
+	}
 	f.Marks = a.matchingMarks(*f)
 }
 
