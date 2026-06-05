@@ -59,21 +59,25 @@
 
         <div v-if="loading" class="empty-state">Loading flow history...</div>
         <div v-else class="transcript">
-          <div
-            v-for="(block, idx) in transcriptBlocks"
-            :key="idx"
-            class="transcript-block"
-            :class="[block.isIncoming ? 'block-incoming' : 'block-outgoing', { banned: block.banned, checker: block.checker, 'negative-response': !block.banned && !block.isIncoming && block.response_code !== null && !isPositiveResponse(block.response_code) }]"
-          >
-            <div class="block-header">
-              <span class="block-time">{{ formatTime(block.created_at) }}</span>
-              <span v-if="block.response_code" class="badge" :class="isPositiveResponse(block.response_code) ? 'badge-success' : 'badge-warning'">{{ block.response_code }}</span>
-              <span v-if="block.banned" class="badge badge-destructive">Banned</span>
-              <span v-if="block.checker" class="badge badge-primary">Checker</span>
+          <div v-for="(item, idx) in flowHistory" :key="item.id" class="flow-occurrence">
+            <div class="occurrence-header">
+              <span class="block-time">{{ idx === 0 ? 'Selected stream' : `History stream #${idx + 1}` }}</span>
+              <span class="text-muted">{{ formatTime(item.created_at) }}</span>
+              <span v-if="item.response_code" class="badge" :class="isPositiveResponse(item.response_code) ? 'badge-success' : 'badge-warning'">{{ item.response_code }}</span>
+              <span v-if="item.banned" class="badge badge-destructive">Banned</span>
+              <span v-if="item.checker" class="badge badge-primary">Checker</span>
             </div>
-            <pre class="block-payload">{{ formatPayload(block) }}</pre>
+            <div v-if="hasRequest(item)" class="transcript-block block-incoming">
+              <div class="block-header"><span>client -> service</span></div>
+              <pre class="block-payload">{{ formatRequestPayload(item.raw_request) }}</pre>
+            </div>
+            <div v-if="hasResponse(item)" class="transcript-block block-outgoing" :class="{ 'negative-response': !item.banned && !isPositiveResponse(item.response_code) }">
+              <div class="block-header"><span>service -> client</span></div>
+              <pre class="block-payload">{{ formatResponsePayload(item.raw_response, item.response_code) }}</pre>
+            </div>
+            <div v-if="!hasRequest(item) && !hasResponse(item)" class="empty-state">No payload captured for flow {{ item.id }}</div>
           </div>
-          <div v-if="transcriptBlocks.length === 0" class="empty-state">
+          <div v-if="flowHistory.length === 0" class="empty-state">
             No payload data captured
           </div>
           <div v-if="loadingMore" class="empty-state">Loading more...</div>
@@ -137,7 +141,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import api from '@/utils/api'
 import type { Flow, Pattern } from '@/types'
 
@@ -152,60 +156,6 @@ const pageSize = 100
 const showUnbanConfirm = ref(false)
 const showCheckerConfirm = ref(false)
 const matchingPatterns = ref<Pattern[]>([])
-
-const transcriptBlocks = computed(() => {
-  const blocks: Array<{
-    isIncoming: boolean
-    created_at: string
-    response_code: number | null
-    banned: boolean
-    checker: boolean
-    raw_request: Record<string, any> | null
-    raw_response: Record<string, any> | null
-  }> = []
-
-  for (const f of flowHistory.value) {
-    const hasReq = !!f.raw_request && Object.keys(f.raw_request).length > 0
-    const hasResp = !!f.raw_response && Object.keys(f.raw_response).length > 0
-
-    if (hasReq) {
-      blocks.push({
-        isIncoming: true,
-        created_at: f.created_at,
-        response_code: null,
-        banned: f.banned,
-        checker: f.checker,
-        raw_request: f.raw_request,
-        raw_response: null,
-      })
-    }
-    if (hasResp) {
-      blocks.push({
-        isIncoming: false,
-        created_at: f.created_at,
-        response_code: f.response_code,
-        banned: f.banned,
-        checker: f.checker,
-        raw_request: null,
-        raw_response: f.raw_response,
-      })
-    }
-
-    if (!hasReq && !hasResp) {
-      blocks.push({
-        isIncoming: false,
-        created_at: f.created_at,
-        response_code: f.response_code,
-        banned: f.banned,
-        checker: f.checker,
-        raw_request: { info: `No payload captured for flow ${f.id}`, direction: f.direction },
-        raw_response: null,
-      })
-    }
-  }
-
-  return blocks
-})
 
 async function fetchFlowHistory(reset = true) {
   if (reset) {
@@ -258,11 +208,8 @@ function isPositiveResponse(code: number) {
   return code === 101 || (code >= 200 && code < 400)
 }
 
-function formatPayload(block: typeof transcriptBlocks.value[0]): string {
-  const raw = block.raw_request || block.raw_response
-  if (!raw) return '(empty)'
-  return block.raw_request ? formatRequestPayload(raw) : formatResponsePayload(raw, block.response_code)
-}
+function hasRequest(flow: Flow) { return !!flow.raw_request && Object.keys(flow.raw_request).length > 0 }
+function hasResponse(flow: Flow) { return !!flow.raw_response && Object.keys(flow.raw_response).length > 0 }
 
 function formatRequestPayload(raw: Record<string, any>): string {
   const method = stringValue(raw.method || 'GET')
@@ -439,6 +386,8 @@ async function confirmUnbanFlow() {
 .summary-item { display: flex; flex-direction: column; gap: 2px; }
 .summary-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .transcript { margin-bottom: 16px; display: flex; flex-direction: column; gap: 10px; }
+.flow-occurrence { border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: color-mix(in srgb, var(--surface) 70%, transparent); }
+.occurrence-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .transcript-block { margin: 10px 0; border-radius: 6px; overflow: visible; display: block; width: 100%; box-sizing: border-box; }
 .block-incoming { border: 2px solid #ef4444; background: #1a0a0a; }
 .block-outgoing { border: 2px solid #22c55e; background: #0a1a0a; }
