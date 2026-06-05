@@ -74,10 +74,11 @@ type Pattern struct {
 }
 
 type Mark struct {
-	ID    int    `json:"id"`
-	Name  string `json:"name"`
-	Regex string `json:"regex"`
-	Color string `json:"color"`
+	ID     int    `json:"id"`
+	Name   string `json:"name"`
+	Regex  string `json:"regex"`
+	Color  string `json:"color"`
+	Banned bool   `json:"banned"`
 }
 
 type MarkHit struct {
@@ -252,6 +253,8 @@ func main() {
 		pr.Get("/marks", app.listMarks)
 		pr.Post("/marks", app.createMark)
 		pr.Post("/marks/defaults", app.loadDefaultMarks)
+		pr.Post("/marks/{id}/ban", app.banMark)
+		pr.Post("/marks/{id}/unban", app.unbanMark)
 		pr.Delete("/marks/{id}", app.deleteMark)
 
 		pr.Get("/flows", app.listFlows)
@@ -1208,7 +1211,7 @@ func (a *App) matchingMarks(f Flow) []MarkHit {
 }
 
 func (a *App) allMarks() []Mark {
-	rows, err := a.db.Query(`SELECT id,name,regex,color FROM marks ORDER BY id ASC`)
+	rows, err := a.db.Query(`SELECT m.id,m.name,m.regex,m.color,EXISTS(SELECT 1 FROM patterns p WHERE p.pattern = m.regex) FROM marks m ORDER BY m.id ASC`)
 	if err != nil {
 		return []Mark{}
 	}
@@ -1216,7 +1219,9 @@ func (a *App) allMarks() []Mark {
 	out := []Mark{}
 	for rows.Next() {
 		var m Mark
-		if rows.Scan(&m.ID, &m.Name, &m.Regex, &m.Color) == nil {
+		var banned int
+		if rows.Scan(&m.ID, &m.Name, &m.Regex, &m.Color, &banned) == nil {
+			m.Banned = banned == 1
 			out = append(out, m)
 		}
 	}
@@ -1494,6 +1499,59 @@ func (a *App) deleteMark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (a *App) banMark(w http.ResponseWriter, r *http.Request) {
+	mark, ok := a.markByID(chi.URLParam(r, "id"))
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "mark not found"})
+		return
+	}
+	rows, err := a.db.Query(`SELECT id FROM services`)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var serviceID int
+		if rows.Scan(&serviceID) != nil {
+			continue
+		}
+		_, _ = a.db.Exec(`INSERT INTO patterns(service_id,pattern,description,mode,active,created_at) SELECT ?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM patterns WHERE service_id = ? AND pattern = ?)`, serviceID, mark.Regex, "Ban from mark: "+markLabel(mark), "B", 1, time.Now().UTC().Format(time.RFC3339), serviceID, mark.Regex)
+		count++
+	}
+	a.recalculateAllFlowBans()
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "services": count})
+}
+
+func (a *App) unbanMark(w http.ResponseWriter, r *http.Request) {
+	mark, ok := a.markByID(chi.URLParam(r, "id"))
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "mark not found"})
+		return
+	}
+	_, err := a.db.Exec(`DELETE FROM patterns WHERE pattern = ?`, mark.Regex)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	a.recalculateAllFlowBans()
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (a *App) markByID(id string) (Mark, bool) {
+	var mark Mark
+	err := a.db.QueryRow(`SELECT id,name,regex,color FROM marks WHERE id = ?`, id).Scan(&mark.ID, &mark.Name, &mark.Regex, &mark.Color)
+	return mark, err == nil
+}
+
+func markLabel(mark Mark) string {
+	if strings.TrimSpace(mark.Name) != "" {
+		return mark.Name
+	}
+	return mark.Regex
 }
 
 func (a *App) loadDefaultMarks(w http.ResponseWriter, _ *http.Request) {

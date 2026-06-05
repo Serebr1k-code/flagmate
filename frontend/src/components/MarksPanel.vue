@@ -22,6 +22,9 @@
           <b>{{ mark.name || mark.regex }}</b>
           <code>{{ mark.regex }}</code>
         </div>
+        <button class="btn btn-sm" :class="mark.banned ? 'btn-outline' : 'btn-destructive'" @click="toggleBan(mark)">
+          {{ mark.banned ? 'Unban' : 'Ban' }}
+        </button>
         <button class="btn btn-sm btn-destructive" @click="deleteMark(mark.id)">Delete</button>
       </div>
       <div v-if="marks.length === 0" class="empty-state">No marks yet</div>
@@ -30,12 +33,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import api from '@/utils/api'
 import type { Mark } from '@/types'
 
 const marks = ref<Mark[]>([])
 const draft = ref({ name: '', regex: '', color: '#ef4444' })
+let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 async function fetchMarks() {
   const { data } = await api.get('/marks')
@@ -54,12 +58,29 @@ async function deleteMark(id: number) {
   await fetchMarks()
 }
 
+async function toggleBan(mark: Mark) {
+  await api.post(`/marks/${mark.id}/${mark.banned ? 'unban' : 'ban'}`)
+  await fetchMarks()
+}
+
 async function loadDefaults() {
   await api.post('/marks/defaults')
   await fetchMarks()
 }
 
-onMounted(fetchMarks)
+function startRefresh() {
+  fetchMarks()
+  refreshTimer = setInterval(fetchMarks, 2000)
+  window.addEventListener('focus', fetchMarks)
+}
+
+function stopRefresh() {
+  if (refreshTimer) clearInterval(refreshTimer)
+  window.removeEventListener('focus', fetchMarks)
+}
+
+onMounted(startRefresh)
+onUnmounted(stopRefresh)
 </script>
 
 <style scoped>

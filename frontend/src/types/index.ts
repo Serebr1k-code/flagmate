@@ -35,6 +35,7 @@ export interface MarkHit {
   name: string
   regex: string
   color: string
+  banned?: boolean
 }
 
 export interface Mark extends MarkHit {}
