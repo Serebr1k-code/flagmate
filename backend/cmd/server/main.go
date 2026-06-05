@@ -255,6 +255,7 @@ func main() {
 		pr.Post("/mirroring", app.setMirroring)
 		pr.Get("/settings", app.getSettings)
 		pr.Post("/settings", app.setSettings)
+		pr.Post("/settings/reset-history", app.resetHistory)
 	})
 
 	log.Printf("backend listening on %s", cfg.ListenAddr)
@@ -2062,6 +2063,40 @@ func (a *App) setSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "poison_mode": mode})
+}
+
+func (a *App) resetHistory(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		DeleteBans bool `json:"delete_bans"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&in)
+	tx, err := a.db.Begin()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer tx.Rollback()
+	stmts := []string{
+		`DELETE FROM flows`,
+		`DELETE FROM flow_payloads`,
+		`DELETE FROM mirror_attempts`,
+		`DELETE FROM mirror_groups`,
+		`DELETE FROM flow_group_meta`,
+	}
+	if in.DeleteBans {
+		stmts = append(stmts, `DELETE FROM patterns`)
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "delete_bans": in.DeleteBans})
 }
 
 func (a *App) poisonMode() string {
