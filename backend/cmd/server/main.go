@@ -156,6 +156,15 @@ type MirrorTarget struct {
 	Port int    `json:"port"`
 }
 
+type MirrorAttemptStat struct {
+	ServiceID int
+	Hash      string
+	TargetIP  string
+	Success   bool
+	Flag      string
+	CreatedAt time.Time
+}
+
 func main() {
 	cfg := loadConfig()
 	if cfg.AutoHook {
@@ -239,6 +248,8 @@ func main() {
 
 		pr.Get("/mirroring", app.getMirroring)
 		pr.Get("/mirroring/groups", app.mirroredGroups)
+		pr.Get("/mirroring/stats", app.mirroringStats)
+		pr.Get("/mirroring/attempts", app.mirroringAttempts)
 		pr.Post("/mirroring", app.setMirroring)
 		pr.Get("/settings", app.getSettings)
 		pr.Post("/settings", app.setSettings)
@@ -303,6 +314,7 @@ func initSchema(db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS mirroring (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL DEFAULT 0, targets TEXT NOT NULL DEFAULT '[]');`,
 		`CREATE TABLE IF NOT EXISTS mirror_groups (hash TEXT PRIMARY KEY, service_id INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
 		`CREATE TABLE IF NOT EXISTS flow_group_meta (hash TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', checker INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
+		`CREATE TABLE IF NOT EXISTS mirror_attempts (id INTEGER PRIMARY KEY AUTOINCREMENT, service_id INTEGER NOT NULL, hash TEXT NOT NULL, flow_id TEXT NOT NULL, target_ip TEXT NOT NULL, target_port INTEGER NOT NULL, success INTEGER NOT NULL DEFAULT 0, flag TEXT NOT NULL DEFAULT '', response TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
 		`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
 		`INSERT OR IGNORE INTO mirroring(id, enabled, targets) VALUES (1, 0, '[]');`,
 		`INSERT OR IGNORE INTO settings(key, value) VALUES ('poison_mode', 'media');`,
@@ -325,6 +337,8 @@ func initSchema(db *sql.DB) error {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_flows_hash_created ON flows(hash, created_at DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_flows_banned ON flows(banned)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_flows_checker ON flows(checker)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_mirror_attempts_group ON mirror_attempts(hash, target_ip, created_at DESC)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_mirror_attempts_created ON mirror_attempts(created_at DESC)`)
 	return nil
 }
 
@@ -1717,6 +1731,158 @@ func (a *App) mirroredGroups(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (a *App) mirroringAttempts(w http.ResponseWriter, r *http.Request) {
+	hash := strings.TrimSpace(r.URL.Query().Get("hash"))
+	targetIP := strings.TrimSpace(r.URL.Query().Get("target_ip"))
+	if hash == "" || targetIP == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "hash and target_ip required"})
+		return
+	}
+	limit := min(200, max(1, parseInt(r.URL.Query().Get("limit"), 50)))
+	rows, err := a.db.Query(`SELECT id,service_id,hash,flow_id,target_ip,target_port,success,flag,response,created_at FROM mirror_attempts WHERE hash = ? AND target_ip = ? ORDER BY created_at DESC LIMIT ?`, hash, targetIP, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id, serviceID, port, success int
+		var hash, flowID, ip, flag, response, createdAt string
+		if rows.Scan(&id, &serviceID, &hash, &flowID, &ip, &port, &success, &flag, &response, &createdAt) == nil {
+			out = append(out, map[string]any{"id": id, "service_id": serviceID, "hash": hash, "flow_id": flowID, "target_ip": ip, "target_port": port, "success": success == 1, "flag": flag, "response": response, "created_at": createdAt})
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *App) mirroringStats(w http.ResponseWriter, _ *http.Request) {
+	rows, err := a.db.Query(`SELECT service_id, hash, target_ip, success, flag, created_at FROM mirror_attempts ORDER BY created_at ASC`)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+	attempts := []MirrorAttemptStat{}
+	for rows.Next() {
+		var serviceID, success int
+		var hash, ip, flag, created string
+		if rows.Scan(&serviceID, &hash, &ip, &success, &flag, &created) != nil {
+			continue
+		}
+		t, _ := time.Parse(time.RFC3339, created)
+		attempts = append(attempts, MirrorAttemptStat{ServiceID: serviceID, Hash: hash, TargetIP: ip, Success: success == 1, Flag: flag, CreatedAt: t})
+	}
+	teamStats := map[string]map[string]any{}
+	groupStats := map[string]map[string]any{}
+	uniqueFlags := map[string]struct{}{}
+	total := len(attempts)
+	successes := 0
+	for _, aitem := range attempts {
+		if _, ok := teamStats[aitem.TargetIP]; !ok {
+			teamStats[aitem.TargetIP] = map[string]any{"target_ip": aitem.TargetIP, "requests": 0, "successes": 0, "flags": 0}
+		}
+		if _, ok := groupStats[aitem.Hash]; !ok {
+			groupStats[aitem.Hash] = map[string]any{"hash": aitem.Hash, "requests": 0, "successes": 0, "flags": 0, "name": a.groupName(aitem.Hash)}
+		}
+		incStat(teamStats[aitem.TargetIP], "requests")
+		incStat(groupStats[aitem.Hash], "requests")
+		if aitem.Success {
+			successes++
+			incStat(teamStats[aitem.TargetIP], "successes")
+			incStat(groupStats[aitem.Hash], "successes")
+		}
+		if aitem.Flag != "" {
+			key := aitem.TargetIP + "|" + aitem.Flag
+			if _, ok := uniqueFlags[key]; !ok {
+				uniqueFlags[key] = struct{}{}
+				incStat(teamStats[aitem.TargetIP], "flags")
+				incStat(groupStats[aitem.Hash], "flags")
+			}
+		}
+	}
+	teams := mapValuesWithRate(teamStats)
+	groups := mapValuesWithRate(groupStats)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total_requests": total,
+		"successes":      successes,
+		"success_rate":   percent(successes, total),
+		"flags":          len(uniqueFlags),
+		"teams":          teams,
+		"groups":         groups,
+		"series": map[string]any{
+			"minute": bucketAttempts(attempts, time.Minute),
+			"10m":    bucketAttempts(attempts, 10*time.Minute),
+			"30m":    bucketAttempts(attempts, 30*time.Minute),
+			"hour":   bucketAttempts(attempts, time.Hour),
+		},
+	})
+}
+
+func incStat(m map[string]any, key string) { m[key] = asInt(m[key]) + 1 }
+
+func mapValuesWithRate(src map[string]map[string]any) []map[string]any {
+	out := make([]map[string]any, 0, len(src))
+	for _, item := range src {
+		item["success_rate"] = percent(asInt(item["successes"]), asInt(item["requests"]))
+		out = append(out, item)
+	}
+	sort.Slice(out, func(i, j int) bool { return asInt(out[i]["flags"]) > asInt(out[j]["flags"]) })
+	return out
+}
+
+func bucketAttempts(attempts []MirrorAttemptStat, step time.Duration) []map[string]any {
+	if len(attempts) == 0 {
+		return []map[string]any{}
+	}
+	type bucket struct{ Requests, Successes, Flags int }
+	buckets := map[int64]*bucket{}
+	seenFlags := map[string]struct{}{}
+	for _, item := range attempts {
+		if item.CreatedAt.IsZero() {
+			continue
+		}
+		key := item.CreatedAt.Truncate(step).Unix()
+		b := buckets[key]
+		if b == nil {
+			b = &bucket{}
+			buckets[key] = b
+		}
+		b.Requests++
+		if item.Success {
+			b.Successes++
+		}
+		if item.Flag != "" {
+			flagKey := strconv.FormatInt(key, 10) + "|" + item.TargetIP + "|" + item.Flag
+			if _, ok := seenFlags[flagKey]; !ok {
+				seenFlags[flagKey] = struct{}{}
+				b.Flags++
+			}
+		}
+	}
+	keys := make([]int64, 0, len(buckets))
+	for key := range buckets {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	out := make([]map[string]any, 0, len(keys))
+	for _, key := range keys {
+		b := buckets[key]
+		out = append(out, map[string]any{"ts": time.Unix(key, 0).UTC().Format(time.RFC3339), "requests": b.Requests, "successes": b.Successes, "flags": b.Flags, "success_rate": percent(b.Successes, b.Requests)})
+	}
+	if len(out) > 60 {
+		out = out[len(out)-60:]
+	}
+	return out
+}
+
+func percent(part, total int) float64 {
+	if total == 0 {
+		return 0
+	}
+	return math.Round((float64(part)/float64(total))*1000) / 10
+}
+
 func (a *App) setMirroring(w http.ResponseWriter, r *http.Request) {
 	var cfg MirroringConfig
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
@@ -1859,7 +2025,8 @@ func (a *App) mirrorMarkedServiceGroups(cfg ServiceMirrorConfig, targets []Mirro
 		payload, _ := json.Marshal(map[string]any{"type": "flagmate_mirror", "service_id": cfg.ServiceID, "hash": hash, "flow": flow})
 		for _, target := range targets {
 			target.Port = servicePort
-			a.sendMirrorPayload(target, string(payload)+"\n")
+			success, flag, response := a.sendMirrorPayload(target, string(payload)+"\n")
+			a.recordMirrorAttempt(cfg.ServiceID, hash, flow.ID, target, success, flag, response)
 		}
 	}
 }
@@ -1872,15 +2039,39 @@ func (a *App) servicePort(serviceID int) int {
 	return port
 }
 
-func (a *App) sendMirrorPayload(target MirrorTarget, payload string) {
+func (a *App) sendMirrorPayload(target MirrorTarget, payload string) (bool, string, string) {
 	addr := net.JoinHostPort(target.IP, strconv.Itoa(target.Port))
 	conn, err := net.DialTimeout("tcp", addr, 700*time.Millisecond)
 	if err != nil {
-		return
+		return false, "", err.Error()
 	}
 	defer conn.Close()
 	_ = conn.SetWriteDeadline(time.Now().Add(700 * time.Millisecond))
-	_, _ = conn.Write([]byte(payload))
+	if _, err := conn.Write([]byte(payload)); err != nil {
+		return false, "", err.Error()
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(1200 * time.Millisecond))
+	buf := make([]byte, 8192)
+	n, _ := conn.Read(buf)
+	response := ""
+	if n > 0 {
+		response = string(buf[:n])
+	}
+	flag := extractFlag(response)
+	return flag != "", flag, response
+}
+
+func (a *App) recordMirrorAttempt(serviceID int, hash, flowID string, target MirrorTarget, success bool, flag, response string) {
+	if len(response) > 4096 {
+		response = response[:4096]
+	}
+	_, _ = a.db.Exec(`INSERT INTO mirror_attempts(service_id,hash,flow_id,target_ip,target_port,success,flag,response,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, serviceID, hash, flowID, target.IP, target.Port, boolInt(success), flag, response, time.Now().UTC().Format(time.RFC3339))
+}
+
+func extractFlag(src string) string {
+	re := regexp.MustCompile(`(?i)([a-z0-9_]+\{[^\s{}]{4,128}\}|flag\{[^\s{}]{4,128}\}|test\{[^\s{}]{4,128}\})`)
+	match := re.FindString(src)
+	return strings.TrimSpace(match)
 }
 
 func scanFlow(rows *sql.Rows) (Flow, error) {

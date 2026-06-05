@@ -26,21 +26,87 @@
         </div>
 
         <div class="mirrored-list">
-          <div v-for="group in groupsForService(service.id)" :key="group.hash" class="mirror-group">
-            <div class="group-main">
+          <div v-for="group in groupsForService(service.id)" :key="group.hash" class="mirror-group-wrap">
+            <div class="mirror-group" @click="toggleGroup(group.hash)">
+              <div class="group-main">
               <input
                 :value="draftNames[group.hash] ?? group.name"
                 class="input name-input"
                 placeholder="Group name"
                 @input="draftNames[group.hash] = ($event.target as HTMLInputElement).value"
                 @change="renameGroup(group)"
+                @click.stop
               />
               <div class="mono target-line">{{ displayGroup(group) }}</div>
               <div class="text-muted small">{{ group.count }} streams · latest {{ formatTime(group.last_seen) }}</div>
+              </div>
+              <button class="btn btn-sm btn-destructive" @click.stop="unmirror(group)">Remove</button>
             </div>
-            <button class="btn btn-sm btn-destructive" @click="unmirror(group)">Remove</button>
+            <div v-if="expandedGroup === group.hash" class="team-drilldown">
+              <button
+                v-for="target in config.targets"
+                :key="target.ip"
+                class="team-pill"
+                :class="{ active: selectedAttemptKey === attemptKey(group.hash, target.ip) }"
+                @click="fetchAttempts(group.hash, target.ip)"
+              >
+                {{ target.ip }} <span>{{ teamSummary(target.ip) }}</span>
+              </button>
+              <div v-if="selectedAttemptKey && selectedAttemptKey.startsWith(group.hash + '|')" class="attempt-list">
+                <div v-for="attempt in selectedAttempts" :key="attempt.id" class="attempt-row" :class="{ success: attempt.success }">
+                  <div>
+                    <b>{{ attempt.success ? 'flag' : 'miss' }}</b>
+                    <span class="mono">{{ attempt.target_ip }}:{{ attempt.target_port }}</span>
+                    <span v-if="attempt.flag" class="flag-chip">{{ attempt.flag }}</span>
+                  </div>
+                  <span class="text-muted small">{{ formatTime(attempt.created_at) }}</span>
+                </div>
+                <div v-if="selectedAttempts.length === 0" class="empty-state">No attempts for this group/team yet</div>
+              </div>
+            </div>
           </div>
           <div v-if="groupsForService(service.id).length === 0" class="empty-state">No mirrored groups for this service</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card stats-card">
+      <div class="card-header stats-head">
+        <div>
+          <h3 class="card-title">Stats</h3>
+          <p class="text-muted">Mirror attempts, stolen flags, and success rates.</p>
+        </div>
+        <button class="btn btn-sm btn-outline" @click="fetchStats">Refresh stats</button>
+      </div>
+      <div class="stats-grid">
+        <div class="stat-tile"><span>Requests</span><b>{{ stats.total_requests }}</b></div>
+        <div class="stat-tile"><span>Flags</span><b>{{ stats.flags }}</b></div>
+        <div class="stat-tile"><span>Success</span><b>{{ stats.success_rate }}%</b></div>
+      </div>
+      <div class="stats-columns">
+        <div>
+          <h4>Teams</h4>
+          <div v-for="team in stats.teams" :key="team.target_ip" class="stat-row">
+            <span class="mono">{{ team.target_ip }}</span>
+            <b>{{ team.flags }} flags</b>
+            <span>{{ team.success_rate }}%</span>
+          </div>
+        </div>
+        <div>
+          <h4>Mirrored flow types</h4>
+          <div v-for="group in stats.groups" :key="group.hash || group.name" class="stat-row">
+            <span>{{ group.name || group.hash?.slice(0, 8) || 'group' }}</span>
+            <b>{{ group.flags }} flags</b>
+            <span>{{ group.success_rate }}%</span>
+          </div>
+        </div>
+      </div>
+      <div class="chart-tabs">
+        <button v-for="bucket in chartBuckets" :key="bucket" class="btn btn-sm" :class="activeBucket === bucket ? 'btn-primary' : 'btn-outline'" @click="activeBucket = bucket">{{ bucket }}</button>
+      </div>
+      <div class="bar-chart">
+        <div v-for="point in chartSeries" :key="point.ts" class="bar-wrap" :title="`${formatTime(point.ts)} · ${point.flags} flags · ${point.requests} req`">
+          <div class="bar" :style="{ height: `${barHeight(point)}%` }"></div>
         </div>
       </div>
     </div>
@@ -67,7 +133,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import api from '@/utils/api'
 import type { FlowGroup, MirroringConfig, Service, ServiceMirrorConfig } from '@/types'
 
@@ -77,21 +143,36 @@ const mirroredGroups = ref<FlowGroup[]>([])
 const draftNames = ref<Record<string, string>>({})
 const newTargetIp = ref('')
 const saving = ref(false)
+const expandedGroup = ref('')
+const selectedAttemptKey = ref('')
+const selectedAttempts = ref<MirrorAttempt[]>([])
+const activeBucket = ref<'minute' | '10m' | '30m' | 'hour'>('10m')
+const chartBuckets = ['minute', '10m', '30m', 'hour'] as const
+const stats = ref<MirrorStats>({ total_requests: 0, successes: 0, success_rate: 0, flags: 0, teams: [], groups: [], series: { minute: [], '10m': [], '30m': [], hour: [] } })
+
+interface MirrorAttempt { id: number; service_id: number; hash: string; flow_id: string; target_ip: string; target_port: number; success: boolean; flag: string; response: string; created_at: string }
+interface StatItem { target_ip?: string; hash?: string; name?: string; requests: number; successes: number; flags: number; success_rate: number }
+interface SeriesPoint { ts: string; requests: number; successes: number; flags: number; success_rate: number }
+interface MirrorStats { total_requests: number; successes: number; success_rate: number; flags: number; teams: StatItem[]; groups: StatItem[]; series: Record<'minute' | '10m' | '30m' | 'hour', SeriesPoint[]> }
 
 async function fetchConfig() {
   try {
-    const [{ data: mirrorData }, { data: serviceData }, { data: groupData }] = await Promise.all([
+    const [{ data: mirrorData }, { data: serviceData }, { data: groupData }, { data: statData }] = await Promise.all([
       api.get('/mirroring'),
       api.get('/services'),
       api.get('/mirroring/groups'),
+      api.get('/mirroring/stats'),
     ])
     config.value = { enabled: false, targets: [], services: [], ...mirrorData }
     services.value = serviceData
     mirroredGroups.value = groupData
+    stats.value = statData
     for (const service of services.value) serviceConfig(service.id)
     for (const group of mirroredGroups.value) draftNames.value[group.hash] = group.name || ''
   } catch (e) { console.error('Failed to fetch mirroring config:', e) }
 }
+
+const chartSeries = computed(() => stats.value.series[activeBucket.value] || [])
 
 function serviceConfig(serviceId: number): ServiceMirrorConfig {
   let cfg = config.value.services.find(s => s.service_id === serviceId)
@@ -144,6 +225,37 @@ async function unmirror(group: FlowGroup) {
   } catch (e) { console.error('Failed to remove mirrored group:', e) }
 }
 
+function toggleGroup(hash: string) {
+  expandedGroup.value = expandedGroup.value === hash ? '' : hash
+  selectedAttemptKey.value = ''
+  selectedAttempts.value = []
+}
+
+function attemptKey(hash: string, ip: string) {
+  return `${hash}|${ip}`
+}
+
+async function fetchAttempts(hash: string, ip: string) {
+  selectedAttemptKey.value = attemptKey(hash, ip)
+  try {
+    const { data } = await api.get('/mirroring/attempts', { params: { hash, target_ip: ip, limit: 100 } })
+    selectedAttempts.value = data
+  } catch (e) { console.error('Failed to fetch mirror attempts:', e) }
+}
+
+async function fetchStats() {
+  try {
+    const { data } = await api.get('/mirroring/stats')
+    stats.value = data
+  } catch (e) { console.error('Failed to fetch mirroring stats:', e) }
+}
+
+function teamSummary(ip: string) {
+  const team = stats.value.teams.find(item => item.target_ip === ip)
+  if (!team) return '0 flags'
+  return `${team.flags} flags · ${team.success_rate}%`
+}
+
 async function saveConfig() {
   saving.value = true
   try {
@@ -162,6 +274,12 @@ function displayGroup(group: FlowGroup) {
 }
 
 function formatTime(ts: string) { return ts ? new Date(ts).toLocaleString() : '—' }
+
+function barHeight(point: SeriesPoint) {
+  const max = Math.max(1, ...chartSeries.value.map(item => item.flags || item.successes || item.requests))
+  const value = point.flags || point.successes || point.requests
+  return Math.max(8, Math.round((value / max) * 100))
+}
 
 onMounted(fetchConfig)
 </script>
@@ -188,7 +306,10 @@ onMounted(fetchConfig)
 .interval-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .interval-input { -moz-appearance: textfield; appearance: textfield; }
 .mirrored-list, .targets-list { display: flex; flex-direction: column; gap: 8px; }
+.mirror-group-wrap { display: flex; flex-direction: column; gap: 8px; }
 .mirror-group, .target-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background-color: var(--surface); }
+.mirror-group { cursor: pointer; }
+.mirror-group:hover { background-color: var(--surface-hover); }
 .group-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 6px; }
 .name-input { max-width: 260px; }
 .target-line { font-size: 13px; font-weight: 700; }
@@ -197,6 +318,26 @@ onMounted(fetchConfig)
 .add-target-form .input { flex: 1; min-width: 180px; }
 .card-header { margin-bottom: 12px; }
 .card-title { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+.team-drilldown { padding: 10px; border: 1px dashed var(--border); border-radius: 10px; background: color-mix(in srgb, var(--surface) 65%, transparent); }
+.team-pill { margin: 0 6px 6px 0; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); color: var(--text); cursor: pointer; }
+.team-pill.active { border-color: var(--primary); color: var(--primary); }
+.team-pill span { margin-left: 6px; color: var(--text-muted); font-size: 11px; }
+.attempt-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.attempt-row { display: flex; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 8px; background: var(--card); border: 1px solid var(--border); }
+.attempt-row.success { border-color: var(--success); background: color-mix(in srgb, var(--success) 12%, var(--card)); }
+.flag-chip { margin-left: 8px; color: var(--success); font-family: 'JetBrains Mono', monospace; }
+.stats-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.stats-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.stat-tile { padding: 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; }
+.stat-tile span { color: var(--text-muted); font-size: 12px; }
+.stat-tile b { font-size: 22px; }
+.stats-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.stats-columns h4 { margin: 0 0 8px; font-size: 14px; color: var(--text-muted); }
+.stat-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.chart-tabs { display: flex; gap: 8px; margin: 14px 0 10px; }
+.bar-chart { height: 120px; display: flex; align-items: end; gap: 4px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.bar-wrap { flex: 1; height: 100%; display: flex; align-items: end; min-width: 4px; }
+.bar { width: 100%; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, var(--success), var(--primary)); opacity: 0.85; }
 .mono { font-family: 'JetBrains Mono', monospace; }
 .text-muted { color: var(--text-muted); }
 .empty-state { padding: 12px; text-align: center; color: var(--text-muted); font-size: 13px; }
