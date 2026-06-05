@@ -45,6 +45,10 @@
             <button class="btn btn-destructive" @click="addPattern">Add</button>
           </div>
 
+          <div v-if="ruleWarnings.length" class="conflict-row">
+            <span v-for="warning in ruleWarnings" :key="warning" class="warning-chip">{{ warning }}</span>
+          </div>
+
           <div class="table-container">
             <table class="table">
               <thead>
@@ -88,7 +92,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import api from '@/utils/api'
 import type { Pattern, Service } from '@/types'
 
@@ -97,6 +101,16 @@ const selectedService = ref<Service | null>(null)
 const patterns = ref<Pattern[]>([])
 const newPattern = ref('')
 const newPatternMode = ref('B')
+const ruleWarnings = computed(() => {
+  const warnings: string[] = []
+  const never = patterns.value.filter(p => (p.match_count || 0) === 0).length
+  const broad = patterns.value.filter(p => (p.match_count || 0) > 100).length
+  const duplicates = patterns.value.length - new Set(patterns.value.map(p => `${p.pattern}:${p.mode}`)).size
+  if (never) warnings.push(`${never} never matched`)
+  if (broad) warnings.push(`${broad} very broad`)
+  if (duplicates) warnings.push(`${duplicates} duplicate/conflicting`)
+  return warnings
+})
 
 async function fetchServices() {
   try {
@@ -179,6 +193,8 @@ onMounted(fetchServices)
 .pane-header h2 { margin: 0; font-size: 20px; }
 .pane-header p { margin: 4px 0 0; }
 .add-pattern-row { display: flex; gap: 8px; align-items: center; }
+.conflict-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.warning-chip { padding: 4px 9px; border-radius: 999px; border: 1px solid var(--warning); color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); font-size: 12px; }
 .table-container { width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; background-color: var(--card); }
 .table { width: 100%; border-collapse: collapse; }
 .table th { padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); background-color: var(--surface); color: var(--text-muted); }

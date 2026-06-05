@@ -62,28 +62,44 @@
               Unban Flow
             </button>
           </div>
+          <div v-if="extractedVariables.length" class="variable-strip">
+            <span v-for="item in extractedVariables" :key="item" class="variable-chip">{{ item }}</span>
+          </div>
+        </div>
+
+        <div class="block-jump">
+          <input v-model="jumpTarget" class="jump-input" placeholder="#" @change="jumpToBlock" @keydown.enter="jumpToBlock" />
         </div>
 
         <div v-if="loading" class="empty-state">Loading flow history...</div>
         <div v-else class="transcript">
-          <div v-for="(item, idx) in flowHistory" :key="item.id" class="flow-occurrence">
+          <template v-for="(entry, idx) in displayedHistory" :key="entry.flow.id">
+          <div :id="`flow-block-${idx + 1}`" class="flow-occurrence">
             <div class="occurrence-header">
-              <span class="block-time">{{ idx === 0 ? 'Selected stream' : `History stream #${idx + 1}` }}</span>
-              <span class="text-muted">{{ formatTime(item.created_at) }}</span>
-              <span v-if="item.response_code" class="badge" :class="isPositiveResponse(item.response_code) ? 'badge-success' : 'badge-warning'">{{ item.response_code }}</span>
-              <span v-if="item.banned" class="badge badge-destructive">Banned</span>
-              <span v-if="item.checker" class="badge badge-primary">Checker</span>
+              <span class="block-time">#{{ idx + 1 }} {{ idx === 0 ? 'Selected stream' : `History stream` }}</span>
+              <span v-if="entry.hiddenCount" class="badge badge-outline">{{ entry.hiddenCount }} similar collapsed</span>
+              <span class="text-muted">{{ formatTime(entry.flow.created_at) }}</span>
+              <span v-if="entry.flow.response_code" class="badge" :class="isPositiveResponse(entry.flow.response_code) ? 'badge-success' : 'badge-warning'">{{ entry.flow.response_code }}</span>
+              <span v-if="entry.flow.banned" class="badge badge-destructive">Banned</span>
+              <span v-if="entry.flow.checker" class="badge badge-primary">Checker</span>
             </div>
-            <div v-if="hasRequest(item)" class="transcript-block block-incoming">
+            <div v-if="hasRequest(entry.flow)" class="transcript-block block-incoming">
               <div class="block-header"><span>client -> service</span></div>
-              <pre class="block-payload" @click.stop="openBanForHighlighted($event, item)" v-html="highlightPayload(formatRequestPayload(item.raw_request, item.marks || []), item.marks || [])"></pre>
+              <div v-if="webSocketFrames(entry.flow.raw_request).length" class="frame-list">
+                <div v-for="(frame, fidx) in webSocketFrames(entry.flow.raw_request)" :key="fidx" class="frame-row client-frame"><b>client frame #{{ fidx + 1 }}</b><pre v-html="highlightPayload(frame, entry.flow.marks || [])"></pre></div>
+              </div>
+              <pre v-else class="block-payload" @click.stop="openBanForHighlighted($event, entry.flow)" v-html="highlightPayload(formatRequestPayload(entry.flow.raw_request, entry.flow.marks || []), entry.flow.marks || [])"></pre>
             </div>
-            <div v-if="hasResponse(item)" class="transcript-block block-outgoing" :class="{ 'negative-response': !item.banned && !isPositiveResponse(item.response_code) }">
+            <div v-if="hasResponse(entry.flow)" class="transcript-block block-outgoing" :class="{ 'negative-response': !entry.flow.banned && !isPositiveResponse(entry.flow.response_code) }">
               <div class="block-header"><span>service -> client</span></div>
-              <pre class="block-payload" @click.stop="openBanForHighlighted($event, item)" v-html="highlightPayload(formatResponsePayload(item.raw_response, item.response_code, item.marks || []), item.marks || [])"></pre>
+              <div v-if="webSocketFrames(entry.flow.raw_response).length" class="frame-list">
+                <div v-for="(frame, fidx) in webSocketFrames(entry.flow.raw_response)" :key="fidx" class="frame-row server-frame"><b>server frame #{{ fidx + 1 }}</b><pre v-html="highlightPayload(frame, entry.flow.marks || [])"></pre></div>
+              </div>
+              <pre v-else class="block-payload" @click.stop="openBanForHighlighted($event, entry.flow)" v-html="highlightPayload(formatResponsePayload(entry.flow.raw_response, entry.flow.response_code, entry.flow.marks || []), entry.flow.marks || [])"></pre>
             </div>
-            <div v-if="!hasRequest(item) && !hasResponse(item)" class="empty-state">No payload captured for flow {{ item.id }}</div>
+            <div v-if="!hasRequest(entry.flow) && !hasResponse(entry.flow)" class="empty-state">No payload captured for flow {{ entry.flow.id }}</div>
           </div>
+          </template>
           <div v-if="flowHistory.length === 0" class="empty-state">
             No payload data captured
           </div>
@@ -163,6 +179,22 @@ const pageSize = 100
 const showUnbanConfirm = ref(false)
 const showCheckerConfirm = ref(false)
 const matchingPatterns = ref<Pattern[]>([])
+const jumpTarget = ref('')
+
+const displayedHistory = computed(() => {
+  const out: Array<{ flow: Flow; hiddenCount: number }> = []
+  for (const flow of flowHistory.value) {
+    const prev = out[out.length - 1]
+    if (prev && similarShape(prev.flow, flow)) prev.hiddenCount++
+    else out.push({ flow, hiddenCount: 0 })
+  }
+  return out
+})
+
+const extractedVariables = computed(() => {
+  const text = `${formatRequestPayload(props.flow.raw_request, props.flow.marks || [])}\n${formatResponsePayload(props.flow.raw_response, props.flow.response_code, props.flow.marks || [])}`
+  return Array.from(new Set((text.match(/[A-Za-z0-9_+\-=./:]{6,96}/g) || []).filter(token => /(?:token|secret|flag|admin|cmd|file|path|callback|http|\/|=|\d{4,})/i.test(token)).slice(0, 18)))
+})
 
 async function fetchFlowHistory(reset = true) {
   if (!showHistory.value) {
@@ -214,6 +246,40 @@ function onPanelScroll(event: Event) {
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 320) {
     fetchFlowHistory(false)
   }
+}
+
+function jumpToBlock() {
+  const n = Number(jumpTarget.value)
+  if (!Number.isFinite(n) || n < 1) return
+  document.getElementById(`flow-block-${n}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function similarShape(a: Flow, b: Flow) {
+  return shapeText(a.raw_request) === shapeText(b.raw_request) && shapeText(a.raw_response) === shapeText(b.raw_response)
+}
+
+function shapeText(raw: Record<string, any>) {
+  const body = stringValue(raw.body || '')
+  return JSON.stringify({ method: raw.method || '', uri: raw.uri || '', queryKeys: queryKeys(String(raw.query || '')), bodyShape: body.replace(/[A-Za-z0-9_+\-=]{4,64}/g, '<v>'), status: raw.status || '' })
+}
+
+function queryKeys(query: string) {
+  return query.split('&').map(part => part.split('=')[0]).filter(Boolean).sort().join(',')
+}
+
+function webSocketFrames(raw: Record<string, any>) {
+  const body = stringValue(raw.body || '')
+  if (!body.includes('websocket') && !looksLikeWebSocket(raw)) return []
+  return body.split('\n').map(line => line.trim()).filter(line => line && line !== 'websocket upgrade').map(line => tryPrettyFrame(line))
+}
+
+function looksLikeWebSocket(raw: Record<string, any>) {
+  const headers = raw.headers || {}
+  return String(headers.Upgrade || headers.upgrade || '').toLowerCase().includes('websocket') || Number(raw.status || 0) === 101
+}
+
+function tryPrettyFrame(frame: string) {
+  try { return JSON.stringify(JSON.parse(frame), null, 2) } catch { return frame }
 }
 
 function openBanForSelection(event: MouseEvent) {
@@ -518,6 +584,10 @@ async function confirmUnbanFlow() {
 .summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 12px; }
 .summary-item { display: flex; flex-direction: column; gap: 2px; }
 .summary-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.variable-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.variable-chip { padding: 3px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-muted); background: var(--surface); font-size: 11px; font-family: 'JetBrains Mono', monospace; }
+.block-jump { position: sticky; top: 150px; z-index: 8; display: flex; justify-content: flex-end; pointer-events: none; height: 0; }
+.jump-input { width: 46px; height: 24px; pointer-events: auto; border: 1px solid var(--border); border-radius: 999px; background: color-mix(in srgb, var(--card) 88%, transparent); color: var(--text); text-align: center; font-size: 12px; outline: none; }
 .transcript { margin-bottom: 16px; display: flex; flex-direction: column; gap: 10px; }
 .flow-occurrence { border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: color-mix(in srgb, var(--surface) 70%, transparent); }
 .occurrence-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
@@ -528,6 +598,12 @@ async function confirmUnbanFlow() {
 .block-header { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: rgba(255,255,255,0.08); flex-wrap: wrap; border-bottom: 1px solid rgba(255,255,255,0.1); }
 .block-time { font-size: 13px; color: #ccc; margin-right: auto; font-weight: 600; }
 .block-payload { padding: 14px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; line-height: 1.6; overflow: visible; white-space: pre-wrap; word-break: break-word; display: block; min-height: 50px; color: #eee; width: 100%; box-sizing: border-box; }
+.frame-list { display: flex; flex-direction: column; gap: 8px; }
+.frame-row { border: 1px solid var(--border); border-radius: 8px; padding: 8px; background: var(--card); }
+.frame-row b { display: block; margin-bottom: 6px; font-size: 12px; color: var(--text-muted); }
+.frame-row pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+.client-frame { border-left: 3px solid var(--primary); }
+.server-frame { border-left: 3px solid var(--success); }
 .code-block { background-color: var(--surface); color: var(--text); }
 .empty-state { text-align: center; padding: 32px; color: var(--text-muted); }
 .dialog-footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border); }
