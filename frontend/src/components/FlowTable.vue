@@ -59,7 +59,12 @@
                 <input type="checkbox" class="checkbox" :checked="selected.has(flow.id)" @change="toggleSelect(flow.id)" />
               </td>
               <td v-if="!selectedFlow" class="text-muted">{{ formatTime(flow.created_at) }}</td>
-              <td>{{ displayDirection(flow) }}</td>
+              <td>
+                <div class="direction-cell">
+                  <span class="direction-service">{{ serviceName(flow) }}</span>
+                  <span class="direction-line">{{ displayDirection(flow) }}</span>
+                </div>
+              </td>
               <td v-if="!selectedFlow">
                 <span class="badge" :class="flow.stability_pct >= 70 ? 'badge-success' : 'badge-warning'">{{ stabilityLabel(flow) }}</span>
                 <span v-if="isWebSocketFlow(flow)" class="badge badge-ws">ws</span>
@@ -97,7 +102,12 @@
               >
                 <td v-if="!selectedFlow" @click.stop></td>
                 <td v-if="!selectedFlow" class="text-muted">{{ formatTime(item.created_at) }}</td>
-                <td>{{ displayDirection(item) }}</td>
+                <td>
+                  <div class="direction-cell">
+                    <span class="direction-service">{{ serviceName(item) }}</span>
+                    <span class="direction-line">{{ displayDirection(item) }}</span>
+                  </div>
+                </td>
                 <td v-if="!selectedFlow">
                   <span class="badge" :class="item.stability_pct >= 70 ? 'badge-success' : 'badge-warning'">{{ stabilityLabel(item) }}</span>
                   <span v-if="isWebSocketFlow(item)" class="badge badge-ws">ws</span>
@@ -362,6 +372,12 @@ function displayDirection(flow: Flow) {
   return `${flow.dst_port}`
 }
 
+function serviceName(flow: Flow) {
+  const service = services.value.find(item => item.id === flow.service_id)
+  if (service) return service.name
+  return flow.service_id ? `service ${flow.service_id}` : 'unknown service'
+}
+
 function toggleSelect(id: string) {
   if (selected.value.has(id)) {
     selected.value.delete(id)
@@ -486,6 +502,9 @@ onUnmounted(disconnectLiveSocket)
 .table td .badge { margin-bottom: 4px; }
 .mark-badge { border: 1px solid; }
 .badge-ws { border: 1px solid #38bdf8; background: rgba(56, 189, 248, 0.18); color: #7dd3fc; text-transform: uppercase; }
+.direction-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.direction-service { font-weight: 700; color: var(--text); }
+.direction-line { color: var(--text-muted); font-family: 'JetBrains Mono', monospace; font-size: 12px; overflow-wrap: anywhere; }
 .mirror-btn { min-width: 76px; justify-content: center; }
 .flow-row:hover td { filter: brightness(1.05); }
 .load-state { text-align: center; color: var(--text-muted); font-size: 12px; padding: 6px; }
