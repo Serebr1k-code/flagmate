@@ -2792,7 +2792,7 @@ func extractFlags(src string) []string {
 }
 
 func defaultFlagRegex() string {
-	return `(?i)(?:[a-z0-9_]+\{[^\s{}]{4,128}\}|flag\{[^\s{}]{4,128}\}|test\{[^\s{}]{4,128}\})`
+	return `(?i)(?:[a-z0-9_]+\{[^\s{}]{4,128}\}|flag\{[^\s{}]{4,128}\}|test\{[^\s{}]{4,128}\}|\b[A-Za-z0-9_+\-=]{24}\b|\b[A-Za-z0-9_+\-=]{32}\b|\b[A-Za-z0-9_+\-=]{48}\b)`
 }
 
 func (a *App) responseMatchesFlagMark(resp map[string]any) bool {
