@@ -23,7 +23,7 @@
             </div>
             <div class="summary-item">
               <span class="label">Protocol</span>
-              <span class="badge badge-outline">{{ flow.proto }}</span>
+              <span class="badge badge-outline">{{ protocolLabel(flow) }}</span>
             </div>
             <div class="summary-item">
               <span class="label">Flows</span>
@@ -79,14 +79,23 @@
               <span v-if="entry.flow.banned" class="badge badge-destructive">Banned</span>
               <span v-if="entry.flow.checker" class="badge badge-primary">Checker</span>
             </div>
-            <div v-if="hasRequest(entry.flow)" class="transcript-block block-incoming">
+            <div v-if="isWebSocketFlow(entry.flow)" class="transcript-block block-ws">
+              <div class="block-header"><span>websocket frames</span></div>
+              <div class="frame-list">
+                <div v-for="(frame, fidx) in webSocketConversation(entry.flow)" :key="fidx" class="frame-row" :class="frame.direction === 'client' ? 'client-frame' : 'server-frame'">
+                  <b>{{ frame.direction }} frame #{{ frame.index }}</b>
+                  <pre @click.stop="openBanForHighlighted($event, entry.flow)" v-html="highlightPayload(frame.text, entry.flow.marks || [])"></pre>
+                </div>
+              </div>
+            </div>
+            <div v-else-if="hasRequest(entry.flow)" class="transcript-block block-incoming">
               <div class="block-header"><span>client -> service</span></div>
               <div v-if="webSocketFrames(entry.flow.raw_request).length" class="frame-list">
                 <div v-for="(frame, fidx) in webSocketFrames(entry.flow.raw_request)" :key="fidx" class="frame-row client-frame"><b>client frame #{{ fidx + 1 }}</b><pre v-html="highlightPayload(frame, entry.flow.marks || [])"></pre></div>
               </div>
               <pre v-else class="block-payload" @click.stop="openBanForHighlighted($event, entry.flow)" v-html="highlightPayload(formatRequestPayload(entry.flow.raw_request, entry.flow.marks || []), entry.flow.marks || [])"></pre>
             </div>
-            <div v-if="hasResponse(entry.flow)" class="transcript-block block-outgoing" :class="{ 'negative-response': !entry.flow.banned && !isPositiveResponse(entry.flow.response_code) }">
+            <div v-if="!isWebSocketFlow(entry.flow) && hasResponse(entry.flow)" class="transcript-block block-outgoing" :class="{ 'negative-response': !entry.flow.banned && !isPositiveResponse(entry.flow.response_code) }">
               <div class="block-header"><span>service -> client</span></div>
               <div v-if="webSocketFrames(entry.flow.raw_response).length" class="frame-list">
                 <div v-for="(frame, fidx) in webSocketFrames(entry.flow.raw_response)" :key="fidx" class="frame-row server-frame"><b>server frame #{{ fidx + 1 }}</b><pre v-html="highlightPayload(frame, entry.flow.marks || [])"></pre></div>
@@ -260,6 +269,32 @@ function webSocketFrames(raw: Record<string, any>) {
   const body = stringValue(raw.body || '')
   if (!body.includes('websocket') && !looksLikeWebSocket(raw)) return []
   return body.split('\n').map(line => line.trim()).filter(line => line && line !== 'websocket upgrade').map(line => tryPrettyFrame(line))
+}
+
+function isWebSocketFlow(flow: Flow) {
+  return protocolLabel(flow) === 'ws'
+}
+
+function protocolLabel(flow: Flow) {
+  return looksLikeWebSocket(flow.raw_request || {}) || looksLikeWebSocket(flow.raw_response || {}) || webSocketFrames(flow.raw_request || {}).length > 0 || webSocketFrames(flow.raw_response || {}).length > 0 ? 'ws' : String(flow.proto || 'tcp')
+}
+
+function webSocketConversation(flow: Flow) {
+  const client = webSocketFrames(flow.raw_request || {}).map((text, index) => ({ direction: 'client', index: index + 1, text }))
+  const server = webSocketFrames(flow.raw_response || {}).map((text, index) => ({ direction: 'server', index: index + 1, text }))
+  if (!client.length) return server
+  if (!server.length) return client
+  const leading = leadingServerFrameCount(server.map(frame => frame.text))
+  return [...server.slice(0, leading), ...client, ...server.slice(leading)]
+}
+
+function leadingServerFrameCount(frames: string[]) {
+  let count = 0
+  for (const frame of frames) {
+    if (!/hello|hint|welcome|ready|banner|connect/i.test(frame)) break
+    count++
+  }
+  return count
 }
 
 function looksLikeWebSocket(raw: Record<string, any>) {
@@ -585,11 +620,14 @@ async function confirmUnbanFlow() {
 .block-header { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: rgba(255,255,255,0.08); flex-wrap: wrap; border-bottom: 1px solid rgba(255,255,255,0.1); }
 .block-time { font-size: 13px; color: #ccc; margin-right: auto; font-weight: 600; }
 .block-payload { padding: 14px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; line-height: 1.6; overflow: visible; white-space: pre-wrap; word-break: break-word; display: block; min-height: 50px; color: #eee; width: 100%; box-sizing: border-box; }
-.frame-list { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 10px; }
-.frame-row { border: 1px solid var(--border); border-radius: 8px; padding: 8px; background: var(--card); }
-.frame-row b { display: block; margin-bottom: 6px; font-size: 12px; color: var(--text-muted); }
-.frame-row pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
-.client-frame, .server-frame { border-left: 1px solid var(--border); }
+.block-ws { border: 2px solid #38bdf8; background: rgba(14, 35, 48, 0.84); }
+.frame-list { display: flex; flex-direction: column; padding: 14px 14px 10px; }
+.frame-row { position: relative; padding: 12px 0 14px; background: transparent; }
+.frame-row + .frame-row::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; border-radius: 999px; background: #22c55e; box-shadow: 0 0 12px rgba(34,197,94,.7); }
+.frame-row b { display: block; margin-bottom: 8px; font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
+.frame-row pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.55; }
+.client-frame b { color: #fca5a5; }
+.server-frame b { color: #86efac; }
 .code-block { background-color: var(--surface); color: var(--text); }
 .empty-state { text-align: center; padding: 32px; color: var(--text-muted); }
 .dialog-footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border); }

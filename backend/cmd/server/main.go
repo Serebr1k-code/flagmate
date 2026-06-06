@@ -793,6 +793,11 @@ func (a *App) storeInlineFlow(r *http.Request, reqMeta, respMeta map[string]any,
 	status := asInt(respMeta["status"])
 	hash := flowHash(reqMeta, respMeta, svcID)
 
+	proto := "tcp"
+	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") || status == http.StatusSwitchingProtocols {
+		proto = "ws"
+	}
+
 	flow := Flow{
 		ID:           newFlowID(),
 		ServiceID:    intPtr(svcID),
@@ -809,7 +814,7 @@ func (a *App) storeInlineFlow(r *http.Request, reqMeta, respMeta map[string]any,
 		DstIP:        "gate",
 		SrcPort:      clientPort,
 		DstPort:      listenPortFromAddr(a.cfg.GateListen),
-		Proto:        "tcp",
+		Proto:        proto,
 		PktCount:     1,
 		BytesIn:      len(jsonString(reqMeta)),
 		BytesOut:     len(jsonString(respMeta)),

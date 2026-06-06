@@ -62,6 +62,7 @@
               <td>{{ displayDirection(flow) }}</td>
               <td v-if="!selectedFlow">
                 <span class="badge" :class="flow.stability_pct >= 70 ? 'badge-success' : 'badge-warning'">{{ stabilityLabel(flow) }}</span>
+                <span v-if="isWebSocketFlow(flow)" class="badge badge-ws">ws</span>
                 <span v-if="flow.group_count > 1" class="badge badge-outline">{{ flow.group_count }}x</span>
                 <span v-if="flow.checker" class="badge badge-primary">Checker</span>
                 <span v-else-if="isProbablyChecker(flow)" class="badge badge-success">Probably checker</span>
@@ -99,6 +100,7 @@
                 <td>{{ displayDirection(item) }}</td>
                 <td v-if="!selectedFlow">
                   <span class="badge" :class="item.stability_pct >= 70 ? 'badge-success' : 'badge-warning'">{{ stabilityLabel(item) }}</span>
+                  <span v-if="isWebSocketFlow(item)" class="badge badge-ws">ws</span>
                   <span v-if="item.checker" class="badge badge-primary">Checker</span>
                   <span v-else-if="isProbablyChecker(item)" class="badge badge-success">Probably checker</span>
                   <span v-for="mark in item.marks || []" :key="mark.id" class="badge mark-badge" :style="markStyle(mark.color)">{{ mark.name || mark.regex }}</span>
@@ -339,6 +341,14 @@ function isProbablyChecker(flow: Flow) {
   return !flow.banned && !flow.checker && (flow.group_count || 0) >= 5 && (flow.stability_pct || 0) >= 70 && (flow.marks || []).length === 0
 }
 
+function isWebSocketFlow(flow: Flow) {
+  const reqHeaders = flow.raw_request?.headers || {}
+  const respHeaders = flow.raw_response?.headers || {}
+  const reqUpgrade = String(reqHeaders.Upgrade || reqHeaders.upgrade || '').toLowerCase()
+  const respUpgrade = String(respHeaders.Upgrade || respHeaders.upgrade || '').toLowerCase()
+  return String(flow.proto || '').toLowerCase() === 'ws' || Number(flow.response_code || flow.raw_response?.status || 0) === 101 || reqUpgrade.includes('websocket') || respUpgrade.includes('websocket') || String(flow.raw_response?.body || '').includes('websocket upgrade')
+}
+
 function markStyle(color: string) {
   return { borderColor: color, backgroundColor: `${color}33`, color }
 }
@@ -472,6 +482,7 @@ onUnmounted(disconnectLiveSocket)
 .table td .badge + .badge { margin-left: 4px; }
 .table td .badge { margin-bottom: 4px; }
 .mark-badge { border: 1px solid; }
+.badge-ws { border: 1px solid #38bdf8; background: rgba(56, 189, 248, 0.18); color: #7dd3fc; text-transform: uppercase; }
 .mirror-btn { min-width: 76px; justify-content: center; }
 .flow-row:hover td { filter: brightness(1.05); }
 .load-state { text-align: center; color: var(--text-muted); font-size: 12px; padding: 6px; }
