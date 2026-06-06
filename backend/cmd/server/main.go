@@ -380,6 +380,7 @@ func initSchema(db *sql.DB) error {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_flows_checker ON flows(checker)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_mirror_attempts_group ON mirror_attempts(hash, target_ip, created_at DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_mirror_attempts_created ON mirror_attempts(created_at DESC)`)
+	_, _ = db.Exec(`UPDATE marks SET regex = ? WHERE lower(name) = 'flag' AND regex LIKE '%A-Za-z0-9_%'`, defaultFlagRegex())
 	return nil
 }
 
@@ -2042,7 +2043,7 @@ func markLabel(mark Mark) string {
 
 func (a *App) loadDefaultMarks(w http.ResponseWriter, _ *http.Request) {
 	defaults := []Mark{
-		{Name: "flag", Regex: `(?i)(?:[a-z0-9_]+\{[A-Za-z0-9_+\-=]{8,128}\}|\b[A-Za-z0-9_+\-=]{16}\b|\b[A-Za-z0-9_+\-=]{24}\b|\b[A-Za-z0-9_+\-=]{32}\b|\b[A-Za-z0-9_+\-=]{48}\b)`, Color: "#ef4444"},
+		{Name: "flag", Regex: defaultFlagRegex(), Color: "#ef4444"},
 		{Name: "sql injection", Regex: `(?i)(?:\bunion\s+select\b|\bor\s+1\s*=\s*1\b|\bsleep\s*\(\s*\d+\s*\)|\binformation_schema\b|(?:--|#|/\*)\s*$)`, Color: "#f97316"},
 		{Name: "command injection", Regex: `(?i)(?:;|\|\||&&|\$\(|` + "`" + `)\s*(?:cat|curl|wget|bash|sh|nc|python|perl|php|id|whoami)\b`, Color: "#dc2626"},
 		{Name: "path traversal", Regex: `(?i)(?:\.\./){2,}|(?:%2e%2e%2f){2,}|/etc/(?:passwd|shadow|hosts)`, Color: "#fb7185"},
@@ -2646,7 +2647,7 @@ func (a *App) attackSessions(w http.ResponseWriter, r *http.Request) {
 	if window < 30 {
 		window = 120
 	}
-	rows, err := a.db.Query(`SELECT f.id,COALESCE(s.name,''),f.service_id,f.src_ip,f.raw_response,f.created_at FROM flows f LEFT JOIN services s ON s.id = f.service_id WHERE f.created_at >= ? ORDER BY f.created_at ASC`, time.Now().Add(-time.Duration(minutes)*time.Minute).UTC().Format(time.RFC3339))
+	rows, err := a.db.Query(`SELECT f.id,COALESCE(s.name,''),f.service_id,f.src_ip,f.raw_request,f.raw_response,f.created_at FROM flows f LEFT JOIN services s ON s.id = f.service_id WHERE f.created_at >= ? ORDER BY f.created_at ASC`, time.Now().Add(-time.Duration(minutes)*time.Minute).UTC().Format(time.RFC3339))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -2665,9 +2666,9 @@ func (a *App) attackSessions(w http.ResponseWriter, r *http.Request) {
 	sessions := []*session{}
 	active := map[string]*session{}
 	for rows.Next() {
-		var id, service, srcIP, respRaw, created string
+		var id, service, srcIP, reqRaw, respRaw, created string
 		var sid sql.NullInt64
-		if rows.Scan(&id, &service, &sid, &srcIP, &respRaw, &created) != nil {
+		if rows.Scan(&id, &service, &sid, &srcIP, &reqRaw, &respRaw, &created) != nil {
 			continue
 		}
 		t, err := time.Parse(time.RFC3339, created)
@@ -2687,8 +2688,13 @@ func (a *App) attackSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		cur.End = t
 		cur.Requests++
-		for _, flag := range extractFlags(flowMatchText(a.hydratePayloadMap(parseJSONMap(respRaw)), 0)) {
+		resp := a.hydratePayloadMap(parseJSONMap(respRaw))
+		flags := extractFlags(flowMatchText(resp, 0))
+		for _, flag := range flags {
 			cur.Flags[flag] = true
+		}
+		if len(flags) == 0 && a.flowMatchesFlagMark(a.hydratePayloadMap(parseJSONMap(reqRaw)), resp) {
+			cur.Flags[id] = true
 		}
 	}
 	out := []map[string]any{}
@@ -2731,7 +2737,12 @@ func (a *App) flagThefts(w http.ResponseWriter, r *http.Request) {
 		if sid.Valid {
 			serviceID = int(sid.Int64)
 		}
-		for _, flag := range extractFlags(flowMatchText(a.hydratePayloadMap(parseJSONMap(respRaw)), 0)) {
+		resp := a.hydratePayloadMap(parseJSONMap(respRaw))
+		flags := extractFlags(flowMatchText(resp, 0))
+		if len(flags) == 0 && a.responseMatchesFlagMark(resp) {
+			flags = []string{"(flag mark)"}
+		}
+		for _, flag := range flags {
 			key := srcIP + "|" + flag
 			if seen[key] {
 				continue
@@ -2778,6 +2789,30 @@ func extractFlags(src string) []string {
 		}
 	}
 	return out
+}
+
+func defaultFlagRegex() string {
+	return `(?i)(?:[a-z0-9_]+\{[^\s{}]{4,128}\}|flag\{[^\s{}]{4,128}\}|test\{[^\s{}]{4,128}\})`
+}
+
+func (a *App) responseMatchesFlagMark(resp map[string]any) bool {
+	return a.flowMatchesFlagMark(nil, resp)
+}
+
+func (a *App) flowMatchesFlagMark(req, resp map[string]any) bool {
+	text := flowMatchText(resp, 0)
+	if req != nil {
+		text += "\n" + flowMatchText(req, 0)
+	}
+	for _, mark := range a.allMarks() {
+		if strings.EqualFold(strings.TrimSpace(mark.Name), "flag") {
+			re, err := regexp.Compile(mark.Regex)
+			if err == nil && re.MatchString(text) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func incStat(m map[string]any, key string) { m[key] = asInt(m[key]) + 1 }
