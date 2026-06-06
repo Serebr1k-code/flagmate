@@ -1971,7 +1971,6 @@ func (a *App) banMark(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "mark not found"})
 		return
 	}
-	_, _ = a.db.Exec(`INSERT INTO patterns(service_id,pattern,description,mode,active,created_at) SELECT NULL,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM patterns WHERE service_id IS NULL AND pattern = ?)`, mark.Regex, "Ban from mark: "+markLabel(mark), "B", 1, time.Now().UTC().Format(time.RFC3339), mark.Regex)
 	rows, err := a.db.Query(`SELECT id FROM services`)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

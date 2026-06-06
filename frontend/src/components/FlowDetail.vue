@@ -79,11 +79,19 @@
               <span v-if="entry.flow.banned" class="badge badge-destructive">Banned</span>
               <span v-if="entry.flow.checker" class="badge badge-primary">Checker</span>
             </div>
+            <div v-if="hasRequest(entry.flow)" class="transcript-block block-incoming">
+              <div class="block-header"><span>client -> service</span></div>
+              <pre class="block-payload" @click.stop="openBanForHighlighted($event, entry.flow)" v-html="highlightPayload(isWebSocketFlow(entry.flow) ? formatWebSocketUpgradeRequest(entry.flow.raw_request) : formatRequestPayload(entry.flow.raw_request, entry.flow.marks || []), entry.flow.marks || [])"></pre>
+            </div>
+            <div v-if="!isWebSocketFlow(entry.flow) && hasResponse(entry.flow)" class="transcript-block block-outgoing" :class="{ 'negative-response': !entry.flow.banned && !isPositiveResponse(entry.flow.response_code) }">
+              <div class="block-header"><span>service -> client</span></div>
+              <pre class="block-payload" @click.stop="openBanForHighlighted($event, entry.flow)" v-html="highlightPayload(formatResponsePayload(entry.flow.raw_response, entry.flow.response_code, entry.flow.marks || []), entry.flow.marks || [])"></pre>
+            </div>
+            <div v-if="isWebSocketFlow(entry.flow) && hasResponse(entry.flow)" class="transcript-block block-outgoing">
+              <div class="block-header"><span>service -> client</span></div>
+              <pre class="block-payload" @click.stop="openBanForHighlighted($event, entry.flow)" v-html="highlightPayload(formatWebSocketUpgradeResponse(entry.flow.raw_response, entry.flow.response_code), entry.flow.marks || [])"></pre>
+            </div>
             <div v-if="isWebSocketFlow(entry.flow)" class="transcript-block block-ws">
-              <div v-if="hasRequest(entry.flow)" class="transcript-block block-incoming ws-upgrade-request">
-                <div class="block-header"><span>client -> service upgrade request</span></div>
-                <pre class="block-payload" @click.stop="openBanForHighlighted($event, entry.flow)" v-html="highlightPayload(formatWebSocketUpgradeRequest(entry.flow.raw_request), entry.flow.marks || [])"></pre>
-              </div>
               <div class="block-header"><span>websocket frames</span></div>
               <div class="frame-list">
                 <div v-for="(frame, fidx) in webSocketConversation(entry.flow)" :key="fidx" class="frame-row" :class="frame.direction === 'client' ? 'client-frame' : 'server-frame'">
@@ -91,20 +99,6 @@
                   <pre @click.stop="openBanForHighlighted($event, entry.flow)" v-html="highlightPayload(frame.text, entry.flow.marks || [])"></pre>
                 </div>
               </div>
-            </div>
-            <div v-else-if="hasRequest(entry.flow)" class="transcript-block block-incoming">
-              <div class="block-header"><span>client -> service</span></div>
-              <div v-if="webSocketFrames(entry.flow.raw_request).length" class="frame-list">
-                <div v-for="(frame, fidx) in webSocketFrames(entry.flow.raw_request)" :key="fidx" class="frame-row client-frame"><b>client frame #{{ fidx + 1 }}</b><pre v-html="highlightPayload(frame, entry.flow.marks || [])"></pre></div>
-              </div>
-              <pre v-else class="block-payload" @click.stop="openBanForHighlighted($event, entry.flow)" v-html="highlightPayload(formatRequestPayload(entry.flow.raw_request, entry.flow.marks || []), entry.flow.marks || [])"></pre>
-            </div>
-            <div v-if="!isWebSocketFlow(entry.flow) && hasResponse(entry.flow)" class="transcript-block block-outgoing" :class="{ 'negative-response': !entry.flow.banned && !isPositiveResponse(entry.flow.response_code) }">
-              <div class="block-header"><span>service -> client</span></div>
-              <div v-if="webSocketFrames(entry.flow.raw_response).length" class="frame-list">
-                <div v-for="(frame, fidx) in webSocketFrames(entry.flow.raw_response)" :key="fidx" class="frame-row server-frame"><b>server frame #{{ fidx + 1 }}</b><pre v-html="highlightPayload(frame, entry.flow.marks || [])"></pre></div>
-              </div>
-              <pre v-else class="block-payload" @click.stop="openBanForHighlighted($event, entry.flow)" v-html="highlightPayload(formatResponsePayload(entry.flow.raw_response, entry.flow.response_code, entry.flow.marks || []), entry.flow.marks || [])"></pre>
             </div>
             <div v-if="!hasRequest(entry.flow) && !hasResponse(entry.flow)" class="empty-state">No payload captured for flow {{ entry.flow.id }}</div>
           </div>
@@ -188,6 +182,7 @@ const pageSize = 100
 const showUnbanConfirm = ref(false)
 const showCheckerConfirm = ref(false)
 const matchingPatterns = ref<Pattern[]>([])
+const bannedHighlightPatterns = ref<Pattern[]>([])
 
 const displayedHistory = computed(() => {
   const out: Array<{ flow: Flow; hiddenCount: number }> = []
@@ -242,11 +237,29 @@ function toggleHistory() {
   fetchFlowHistory(true)
 }
 
-onMounted(() => fetchFlowHistory(true))
+onMounted(() => {
+  fetchFlowHistory(true)
+  fetchBannedHighlightPatterns()
+})
 watch(() => props.flow.id, () => {
   showHistory.value = false
   fetchFlowHistory(true)
+  fetchBannedHighlightPatterns()
 })
+
+async function fetchBannedHighlightPatterns() {
+  if (!props.flow.banned) {
+    bannedHighlightPatterns.value = []
+    return
+  }
+  try {
+    const { data } = await api.get(`/flows/${props.flow.id}/matching-patterns`)
+    bannedHighlightPatterns.value = Array.isArray(data) ? data : []
+  } catch (e) {
+    console.error('Failed to fetch banned highlight patterns:', e)
+    bannedHighlightPatterns.value = []
+  }
+}
 
 function onPanelScroll(event: Event) {
   const el = event.currentTarget as HTMLElement
@@ -385,6 +398,20 @@ function formatWebSocketUpgradeRequest(raw: Record<string, any>): string {
   return lines.join('\n')
 }
 
+function formatWebSocketUpgradeResponse(raw: Record<string, any>, responseCode: number | null): string {
+  const status = Number(raw.status || responseCode || 101)
+  const headers = normalizeHeaders(raw.headers)
+  const lines: string[] = []
+  lines.push(`HTTP ${status}`)
+  for (const [key, value] of Object.entries(headers)) lines.push(`${key}: ${value}`)
+  lines.push('')
+  lines.push('---')
+  lines.push(`status: ${status}`)
+  lines.push('upgrade: websocket')
+  lines.push('payload: (websocket frames below)')
+  return lines.join('\n')
+}
+
 function formatResponsePayload(raw: Record<string, any>, responseCode: number | null, marks: MarkHit[] = []): string {
   const status = Number(raw.status || responseCode || 0)
   const headers = normalizeHeaders(raw.headers)
@@ -436,13 +463,18 @@ function preserveMarkText(raw: string, formatted: string, marks: MarkHit[]) {
 
 function highlightPayload(text: string, marks: MarkHit[]): string {
   if (!text) return ''
-  const ranges: Array<{ start: number; end: number; color: string }> = []
+  const ranges: Array<{ start: number; end: number; color: string; kind: 'mark' | 'diff' | 'ban' }> = []
+  for (const pattern of bannedHighlightPatterns.value) {
+    for (const range of bannedPatternRanges(text, pattern.pattern)) {
+      ranges.push({ ...range, color: '#ef4444', kind: 'ban' })
+    }
+  }
   for (const mark of marks) {
     try {
       const re = compileMarkRegex(mark.regex)
       for (const match of text.matchAll(re)) {
         if (match.index === undefined || !match[0]) continue
-        ranges.push({ start: match.index, end: match.index + match[0].length, color: mark.color })
+        ranges.push({ start: match.index, end: match.index + match[0].length, color: mark.color, kind: 'mark' })
       }
     } catch {}
   }
@@ -451,7 +483,7 @@ function highlightPayload(text: string, marks: MarkHit[]): string {
     const re = new RegExp(escaped, 'g')
     for (const match of text.matchAll(re)) {
       if (match.index === undefined) continue
-      ranges.push({ start: match.index, end: match.index + token.length, color: '#a855f7' })
+      ranges.push({ start: match.index, end: match.index + token.length, color: '#a855f7', kind: 'diff' })
     }
   }
   if (showHistory.value && flowHistory.value.length > 1) {
@@ -460,12 +492,12 @@ function highlightPayload(text: string, marks: MarkHit[]): string {
       for (const match of text.matchAll(re)) {
         if (match.index === undefined || !match[2]) continue
         const start = match.index + match[1].length
-        ranges.push({ start, end: start + match[2].length, color: '#a855f7' })
+        ranges.push({ start, end: start + match[2].length, color: '#a855f7', kind: 'diff' })
       }
     }
   }
   if (!ranges.length) return escapeHTML(text)
-  ranges.sort((a, b) => a.start - b.start || b.end - a.end)
+  ranges.sort((a, b) => a.start - b.start || kindPriority(a.kind) - kindPriority(b.kind) || b.end - a.end)
   const merged: typeof ranges = []
   for (const r of ranges) {
     const last = merged[merged.length - 1]
@@ -476,12 +508,40 @@ function highlightPayload(text: string, marks: MarkHit[]): string {
   let cursor = 0
   for (const r of merged) {
     out += escapeHTML(text.slice(cursor, r.start))
-    const isDiff = r.color.toLowerCase() === '#a855f7'
-    out += `<mark data-ban-hit="1" style="background:${escapeAttr(r.color)}${isDiff ? '22' : '55'};border-bottom:${isDiff ? '2px dashed' : '1px solid'} ${escapeAttr(r.color)};color:inherit;padding:0 2px;border-radius:3px;cursor:pointer">${escapeHTML(text.slice(r.start, r.end))}</mark>`
+    if (r.kind === 'ban') {
+      out += `<mark data-ban-hit="1" class="banned-text-hit">${escapeHTML(text.slice(r.start, r.end))}</mark>`
+    } else {
+      const isDiff = r.kind === 'diff'
+      out += `<mark data-ban-hit="1" style="background:${escapeAttr(r.color)}${isDiff ? '22' : '55'};border-bottom:${isDiff ? '2px dashed' : '1px solid'} ${escapeAttr(r.color)};color:inherit;padding:0 2px;border-radius:3px;cursor:pointer">${escapeHTML(text.slice(r.start, r.end))}</mark>`
+    }
     cursor = r.end
   }
   out += escapeHTML(text.slice(cursor))
   return out
+}
+
+function bannedPatternRanges(text: string, pattern: string) {
+  const ranges: Array<{ start: number; end: number }> = []
+  if (!pattern) return ranges
+  try {
+    const re = new RegExp(pattern, 'gi')
+    for (const match of text.matchAll(re)) {
+      if (match.index !== undefined && match[0]) ranges.push({ start: match.index, end: match.index + match[0].length })
+    }
+  } catch {}
+  if (ranges.length) return ranges
+  const lowerText = text.toLowerCase()
+  const lowerPattern = pattern.toLowerCase()
+  for (let index = lowerText.indexOf(lowerPattern); index !== -1; index = lowerText.indexOf(lowerPattern, index + Math.max(1, lowerPattern.length))) {
+    ranges.push({ start: index, end: index + pattern.length })
+  }
+  return ranges
+}
+
+function kindPriority(kind: 'mark' | 'diff' | 'ban') {
+  if (kind === 'ban') return 0
+  if (kind === 'mark') return 1
+  return 2
 }
 
 function compileMarkRegex(regex: string) {
@@ -641,18 +701,21 @@ async function confirmUnbanFlow() {
 .block-outgoing.negative-response { border-color: #f59e0b; background: rgba(245, 158, 11, 0.16); }
 .block-header { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: rgba(255,255,255,0.08); flex-wrap: wrap; border-bottom: 1px solid rgba(255,255,255,0.1); }
 .block-time { font-size: 13px; color: #ccc; margin-right: auto; font-weight: 600; }
-.block-payload { padding: 14px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; line-height: 1.6; overflow: visible; white-space: pre-wrap; word-break: break-word; display: block; min-height: 50px; color: #eee; width: 100%; box-sizing: border-box; }
+.block-payload { padding: 14px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; line-height: 1.6; overflow-x: auto; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; display: block; min-height: 50px; color: #eee; width: 100%; max-width: 100%; box-sizing: border-box; }
 .block-ws { border: 2px solid var(--border); background: rgba(10, 10, 10, 0.22); }
-.ws-upgrade-request { margin: 10px; }
 .frame-list { display: flex; flex-direction: column; padding: 14px 14px 10px; }
 .frame-row { position: relative; padding: 12px 12px 14px; background: transparent; }
 .frame-row + .frame-row::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; border-radius: 999px; background: #22c55e; box-shadow: 0 0 12px rgba(34,197,94,.7); }
 .frame-row b { display: block; margin-bottom: 8px; font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
-.frame-row pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.55; }
+.frame-row pre { margin: 0; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.55; }
 .client-frame { background: rgba(239, 68, 68, 0.18); }
 .server-frame { background: rgba(34, 197, 94, 0.16); }
 .client-frame b { color: #fecaca; }
 .server-frame b { color: #bbf7d0; }
+:deep(.banned-text-hit) { position: relative; color: inherit; padding: 0 3px; border-radius: 3px; cursor: pointer; background: rgba(239, 68, 68, 0.10); box-shadow: inset 0 0 0 1px rgba(239,68,68,.45); }
+:deep(.banned-text-hit::after) { content: ''; position: absolute; inset: -1px; border-radius: 3px; pointer-events: none; background: repeating-linear-gradient(135deg, transparent 0 4px, var(--destructive) 4px 9px, transparent 9px 13px); opacity: .95; }
+:deep(.banned-text-hit:hover) { background: transparent; box-shadow: none; }
+:deep(.banned-text-hit:hover::after) { opacity: 0; }
 .code-block { background-color: var(--surface); color: var(--text); }
 .empty-state { text-align: center; padding: 32px; color: var(--text-muted); }
 .dialog-footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border); }
