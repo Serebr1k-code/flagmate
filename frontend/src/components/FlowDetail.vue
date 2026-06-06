@@ -246,6 +246,11 @@ watch(() => props.flow.id, () => {
   fetchFlowHistory(true)
   fetchBannedHighlightPatterns()
 })
+watch(() => props.flow, () => {
+  showHistory.value = false
+  fetchFlowHistory(true)
+  fetchBannedHighlightPatterns()
+})
 
 async function fetchBannedHighlightPatterns() {
   if (!props.flow.banned) {
@@ -497,26 +502,27 @@ function highlightPayload(text: string, marks: MarkHit[]): string {
     }
   }
   if (!ranges.length) return escapeHTML(text)
-  ranges.sort((a, b) => a.start - b.start || kindPriority(a.kind) - kindPriority(b.kind) || b.end - a.end)
-  const merged: typeof ranges = []
-  for (const r of ranges) {
-    const last = merged[merged.length - 1]
-    if (last && r.start < last.end) continue
-    merged.push(r)
-  }
+  ranges.sort((a, b) => a.start - b.start || b.end - a.end)
+  const points = Array.from(new Set([0, text.length, ...ranges.flatMap(r => [r.start, r.end])])).filter(point => point >= 0 && point <= text.length).sort((a, b) => a - b)
   let out = ''
-  let cursor = 0
-  for (const r of merged) {
-    out += escapeHTML(text.slice(cursor, r.start))
-    if (r.kind === 'ban') {
-      out += `<mark data-ban-hit="1" class="banned-text-hit">${escapeHTML(text.slice(r.start, r.end))}</mark>`
+  for (let i = 0; i < points.length - 1; i++) {
+    const start = points[i]
+    const end = points[i + 1]
+    if (start === end) continue
+    const covering = ranges.filter(r => r.start <= start && r.end >= end)
+    const banned = covering.some(r => r.kind === 'ban')
+    const base = covering.find(r => r.kind === 'mark') || covering.find(r => r.kind === 'diff')
+    const content = escapeHTML(text.slice(start, end))
+    if (!base && !banned) {
+      out += content
+    } else if (base) {
+      const isDiff = base.kind === 'diff'
+      const klass = banned ? ' class="banned-text-hit"' : ''
+      out += `<mark data-ban-hit="1"${klass} style="background:${escapeAttr(base.color)}${isDiff ? '22' : '55'};border-bottom:${isDiff ? '2px dashed' : '1px solid'} ${escapeAttr(base.color)};color:inherit;padding:0 2px;border-radius:3px;cursor:pointer">${content}</mark>`
     } else {
-      const isDiff = r.kind === 'diff'
-      out += `<mark data-ban-hit="1" style="background:${escapeAttr(r.color)}${isDiff ? '22' : '55'};border-bottom:${isDiff ? '2px dashed' : '1px solid'} ${escapeAttr(r.color)};color:inherit;padding:0 2px;border-radius:3px;cursor:pointer">${escapeHTML(text.slice(r.start, r.end))}</mark>`
+      out += `<mark data-ban-hit="1" class="banned-text-hit">${content}</mark>`
     }
-    cursor = r.end
   }
-  out += escapeHTML(text.slice(cursor))
   return out
 }
 
@@ -536,12 +542,6 @@ function bannedPatternRanges(text: string, pattern: string) {
     ranges.push({ start: index, end: index + pattern.length })
   }
   return ranges
-}
-
-function kindPriority(kind: 'mark' | 'diff' | 'ban') {
-  if (kind === 'ban') return 0
-  if (kind === 'mark') return 1
-  return 2
 }
 
 function compileMarkRegex(regex: string) {
@@ -712,7 +712,7 @@ async function confirmUnbanFlow() {
 .server-frame { background: rgba(34, 197, 94, 0.16); }
 .client-frame b { color: #fecaca; }
 .server-frame b { color: #bbf7d0; }
-:deep(.banned-text-hit) { position: relative; color: inherit; padding: 0 3px; border-radius: 3px; cursor: pointer; background: rgba(239, 68, 68, 0.10); box-shadow: inset 0 0 0 1px rgba(239,68,68,.45); }
+:deep(.banned-text-hit) { position: relative; color: inherit; padding: 0 3px; border-radius: 3px; cursor: pointer; background-color: transparent; }
 :deep(.banned-text-hit::after) { content: ''; position: absolute; inset: -1px; border-radius: 3px; pointer-events: none; background: repeating-linear-gradient(135deg, transparent 0 4px, var(--destructive) 4px 9px, transparent 9px 13px); opacity: .95; }
 :deep(.banned-text-hit:hover) { background: transparent; box-shadow: none; }
 :deep(.banned-text-hit:hover::after) { opacity: 0; }
