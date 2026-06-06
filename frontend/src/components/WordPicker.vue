@@ -130,7 +130,7 @@
 
         <div class="dialog-footer">
           <div class="footer-impact">
-            <span v-if="impactPercent > 25" class="impact-warning">This will ban ~{{ impactPercent }}% flows ({{ impact.flows }}/{{ impactTotal }})!</span>
+            <span v-if="impactPercent > 25" class="impact-warning">This will ban ~{{ impactPercent }}% flows ({{ impact.flows }}/{{ impactTotal }})</span>
             <span>groups: {{ impact.groups }}</span>
             <span>flows: {{ impact.flows }}</span>
             <span>checkers: {{ impact.checkers }}</span>
