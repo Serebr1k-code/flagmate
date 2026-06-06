@@ -80,6 +80,10 @@
               <span v-if="entry.flow.checker" class="badge badge-primary">Checker</span>
             </div>
             <div v-if="isWebSocketFlow(entry.flow)" class="transcript-block block-ws">
+              <div v-if="hasRequest(entry.flow)" class="transcript-block block-incoming ws-upgrade-request">
+                <div class="block-header"><span>client -> service upgrade request</span></div>
+                <pre class="block-payload" @click.stop="openBanForHighlighted($event, entry.flow)" v-html="highlightPayload(formatWebSocketUpgradeRequest(entry.flow.raw_request), entry.flow.marks || [])"></pre>
+              </div>
               <div class="block-header"><span>websocket frames</span></div>
               <div class="frame-list">
                 <div v-for="(frame, fidx) in webSocketConversation(entry.flow)" :key="fidx" class="frame-row" :class="frame.direction === 'client' ? 'client-frame' : 'server-frame'">
@@ -363,6 +367,24 @@ function formatRequestPayload(raw: Record<string, any>, marks: MarkHit[] = []): 
   return lines.join('\n')
 }
 
+function formatWebSocketUpgradeRequest(raw: Record<string, any>): string {
+  const method = stringValue(raw.method || 'GET')
+  const uri = stringValue(raw.uri || raw.url || '/')
+  const query = stringValue(raw.query || '')
+  const headers = normalizeHeaders(raw.headers)
+  const lines: string[] = []
+  lines.push(`${method} ${uri}${query ? `?${query}` : ''} HTTP`)
+  for (const [key, value] of Object.entries(headers)) lines.push(`${key}: ${value}`)
+  lines.push('')
+  lines.push('---')
+  lines.push(`method: ${method}`)
+  lines.push(`uri: ${uri}`)
+  if (query) lines.push(`query: ${query}`)
+  lines.push('upgrade: websocket')
+  lines.push('payload: (websocket frames below)')
+  return lines.join('\n')
+}
+
 function formatResponsePayload(raw: Record<string, any>, responseCode: number | null, marks: MarkHit[] = []): string {
   const status = Number(raw.status || responseCode || 0)
   const headers = normalizeHeaders(raw.headers)
@@ -621,6 +643,7 @@ async function confirmUnbanFlow() {
 .block-time { font-size: 13px; color: #ccc; margin-right: auto; font-weight: 600; }
 .block-payload { padding: 14px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; line-height: 1.6; overflow: visible; white-space: pre-wrap; word-break: break-word; display: block; min-height: 50px; color: #eee; width: 100%; box-sizing: border-box; }
 .block-ws { border: 2px solid var(--border); background: rgba(10, 10, 10, 0.22); }
+.ws-upgrade-request { margin: 10px; }
 .frame-list { display: flex; flex-direction: column; padding: 14px 14px 10px; }
 .frame-row { position: relative; padding: 12px 12px 14px; background: transparent; }
 .frame-row + .frame-row::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; border-radius: 999px; background: #22c55e; box-shadow: 0 0 12px rgba(34,197,94,.7); }
