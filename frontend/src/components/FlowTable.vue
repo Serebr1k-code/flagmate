@@ -63,11 +63,11 @@
               <td v-if="!selectedFlow">
                 <span class="badge" :class="flow.stability_pct >= 70 ? 'badge-success' : 'badge-warning'">{{ stabilityLabel(flow) }}</span>
                 <span v-if="isWebSocketFlow(flow)" class="badge badge-ws">ws</span>
-                <span v-if="flow.group_count > 1" class="badge badge-outline">{{ flow.group_count }}x</span>
                 <span v-if="flow.checker" class="badge badge-primary">Checker</span>
                 <span v-else-if="isProbablyChecker(flow)" class="badge badge-success">Probably checker</span>
                 <span v-if="flow.banned" class="badge badge-destructive">Banned</span>
                 <span v-for="mark in flow.marks || []" :key="mark.id" class="badge mark-badge" :style="markStyle(mark.color)">{{ mark.name || mark.regex }}</span>
+                <span v-if="flow.group_count > 1" class="badge badge-outline">{{ flow.group_count }}x</span>
               </td>
               <td v-if="!selectedFlow">
                 <span class="badge" :class="isPositiveResponse(flow.response_code) ? 'badge-success' : 'badge-warning'">{{ flow.response_code }}</span>
