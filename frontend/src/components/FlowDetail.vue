@@ -163,6 +163,22 @@
       </div>
     </div>
   </Teleport>
+
+  <Teleport to="body">
+    <div v-if="showUnbanPieceConfirm" class="confirm-overlay" @click.self="showUnbanPieceConfirm = false">
+      <div class="confirm-dialog">
+        <h2>Unban this piece?</h2>
+        <p class="text-muted">This removes only this ban rule for the current service.</p>
+        <div v-if="pendingPiecePattern" class="confirm-list">
+          <span class="confirm-chip">{{ pendingPiecePattern.pattern }}</span>
+        </div>
+        <div class="confirm-actions">
+          <button class="btn btn-outline" @click="showUnbanPieceConfirm = false">Cancel</button>
+          <button class="btn btn-destructive" @click="confirmUnbanPiece">Delete this rule</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -181,8 +197,10 @@ const showHistory = ref(false)
 const pageSize = 100
 const showUnbanConfirm = ref(false)
 const showCheckerConfirm = ref(false)
+const showUnbanPieceConfirm = ref(false)
 const matchingPatterns = ref<Pattern[]>([])
 const bannedHighlightPatterns = ref<Pattern[]>([])
+const pendingPiecePattern = ref<Pattern | null>(null)
 
 const displayedHistory = computed(() => {
   const out: Array<{ flow: Flow; hiddenCount: number }> = []
@@ -338,6 +356,13 @@ function openBanForSelection(event: MouseEvent) {
 
 function openBanForHighlighted(event: MouseEvent, flow: Flow) {
   const target = event.target as HTMLElement | null
+  const bannedHit = target?.closest('[data-unban-pattern-id]') as HTMLElement | null
+  const patternID = Number(bannedHit?.dataset.unbanPatternId || 0)
+  if (patternID) {
+    pendingPiecePattern.value = bannedHighlightPatterns.value.find(pattern => pattern.id === patternID) || null
+    showUnbanPieceConfirm.value = !!pendingPiecePattern.value
+    return
+  }
   const hit = target?.closest('[data-ban-hit]') as HTMLElement | null
   const text = hit?.textContent?.trim()
   if (!text) return
@@ -468,10 +493,10 @@ function preserveMarkText(raw: string, formatted: string, marks: MarkHit[]) {
 
 function highlightPayload(text: string, marks: MarkHit[]): string {
   if (!text) return ''
-  const ranges: Array<{ start: number; end: number; color: string; kind: 'mark' | 'diff' | 'ban' }> = []
+  const ranges: Array<{ start: number; end: number; color: string; kind: 'mark' | 'diff' | 'ban'; patternId?: number }> = []
   for (const pattern of bannedHighlightPatterns.value) {
     for (const range of bannedPatternRanges(text, pattern.pattern)) {
-      ranges.push({ ...range, color: '#ef4444', kind: 'ban' })
+      ranges.push({ ...range, color: '#ef4444', kind: 'ban', patternId: pattern.id })
     }
   }
   for (const mark of marks) {
@@ -510,17 +535,19 @@ function highlightPayload(text: string, marks: MarkHit[]): string {
     const end = points[i + 1]
     if (start === end) continue
     const covering = ranges.filter(r => r.start <= start && r.end >= end)
-    const banned = covering.some(r => r.kind === 'ban')
+    const banRange = covering.find(r => r.kind === 'ban')
+    const banned = !!banRange
     const base = covering.find(r => r.kind === 'mark') || covering.find(r => r.kind === 'diff')
     const content = escapeHTML(text.slice(start, end))
+    const banAttrs = banned && banRange?.patternId ? ` data-unban-pattern-id="${banRange.patternId}"` : ''
     if (!base && !banned) {
       out += content
     } else if (base) {
       const isDiff = base.kind === 'diff'
       const klass = banned ? ' class="banned-text-hit"' : ''
-      out += `<mark data-ban-hit="1"${klass} style="background:${escapeAttr(base.color)}${isDiff ? '22' : '55'};border-bottom:${isDiff ? '2px dashed' : '1px solid'} ${escapeAttr(base.color)};color:inherit;padding:0 2px;border-radius:3px;cursor:pointer">${content}</mark>`
+      out += `<mark data-ban-hit="1"${banAttrs}${klass} style="background:${escapeAttr(base.color)}${isDiff ? '22' : '55'};border-bottom:${isDiff ? '2px dashed' : '1px solid'} ${escapeAttr(base.color)};color:inherit;padding:0 2px;border-radius:3px;cursor:pointer">${content}</mark>`
     } else {
-      out += `<mark data-ban-hit="1" class="banned-text-hit">${content}</mark>`
+      out += `<mark data-ban-hit="1"${banAttrs} class="banned-text-hit">${content}</mark>`
     }
   }
   return out
@@ -676,6 +703,21 @@ async function confirmUnbanFlow() {
     showUnbanConfirm.value = false
     emit('flowUpdated', props.flow)
   } catch (e) { console.error('Failed to remove matching patterns:', e) }
+}
+
+async function confirmUnbanPiece() {
+  const pattern = pendingPiecePattern.value
+  if (!pattern) return
+  try {
+    await api.delete(`/patterns/${pattern.id}`)
+    const { data } = await api.get(`/flows/${props.flow.id}`)
+    pendingPiecePattern.value = null
+    showUnbanPieceConfirm.value = false
+    emit('flowUpdated', data)
+    bannedHighlightPatterns.value = data.banned ? (await api.get(`/flows/${data.id}/matching-patterns`)).data || [] : []
+  } catch (e) {
+    console.error('Failed to unban piece:', e)
+  }
 }
 </script>
 
