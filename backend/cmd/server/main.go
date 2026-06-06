@@ -284,6 +284,10 @@ func main() {
 		pr.Get("/mirroring/stats", app.mirroringStats)
 		pr.Get("/mirroring/attempts", app.mirroringAttempts)
 		pr.Post("/mirroring", app.setMirroring)
+		pr.Get("/stats/settings", app.getStatsSettings)
+		pr.Post("/stats/settings", app.setStatsSettings)
+		pr.Get("/stats/attack-sessions", app.attackSessions)
+		pr.Get("/stats/flag-thefts", app.flagThefts)
 		pr.Get("/settings", app.getSettings)
 		pr.Post("/settings", app.setSettings)
 		pr.Post("/settings/reset-history", app.resetHistory)
@@ -2610,6 +2614,170 @@ func (a *App) mirroringStats(w http.ResponseWriter, _ *http.Request) {
 			"hour":   bucketAttempts(attempts, time.Hour),
 		},
 	})
+}
+
+func (a *App) getStatsSettings(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"team_name": a.setting("stats_team_name"), "board_url": a.setting("stats_board_url")})
+}
+
+func (a *App) setStatsSettings(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		TeamName string `json:"team_name"`
+		BoardURL string `json:"board_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+	_, err := a.db.Exec(`INSERT INTO settings(key,value) VALUES ('stats_team_name', ?), ('stats_board_url', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, strings.TrimSpace(in.TeamName), strings.TrimSpace(in.BoardURL))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (a *App) attackSessions(w http.ResponseWriter, r *http.Request) {
+	minutes := queryInt(r, "minutes", 120)
+	window := queryInt(r, "window", 120)
+	if minutes < 5 {
+		minutes = 5
+	}
+	if window < 30 {
+		window = 120
+	}
+	rows, err := a.db.Query(`SELECT f.id,COALESCE(s.name,''),f.service_id,f.src_ip,f.raw_response,f.created_at FROM flows f LEFT JOIN services s ON s.id = f.service_id WHERE f.created_at >= ? ORDER BY f.created_at ASC`, time.Now().Add(-time.Duration(minutes)*time.Minute).UTC().Format(time.RFC3339))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+	type session struct {
+		AttackerIP string
+		ServiceID  int
+		Service    string
+		Start      time.Time
+		End        time.Time
+		Requests   int
+		Flags      map[string]bool
+		FlowID     string
+	}
+	sessions := []*session{}
+	active := map[string]*session{}
+	for rows.Next() {
+		var id, service, srcIP, respRaw, created string
+		var sid sql.NullInt64
+		if rows.Scan(&id, &service, &sid, &srcIP, &respRaw, &created) != nil {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, created)
+		if err != nil {
+			continue
+		}
+		serviceID := 0
+		if sid.Valid {
+			serviceID = int(sid.Int64)
+		}
+		key := fmt.Sprintf("%s|%d", srcIP, serviceID)
+		cur := active[key]
+		if cur == nil || t.Sub(cur.End) > time.Duration(window)*time.Second {
+			cur = &session{AttackerIP: srcIP, ServiceID: serviceID, Service: service, Start: t, End: t, Flags: map[string]bool{}, FlowID: id}
+			active[key] = cur
+			sessions = append(sessions, cur)
+		}
+		cur.End = t
+		cur.Requests++
+		for _, flag := range extractFlags(flowMatchText(a.hydratePayloadMap(parseJSONMap(respRaw)), 0)) {
+			cur.Flags[flag] = true
+		}
+	}
+	out := []map[string]any{}
+	for _, item := range sessions {
+		if item.Requests < 2 && len(item.Flags) == 0 {
+			continue
+		}
+		out = append(out, map[string]any{"attacker_ip": item.AttackerIP, "service_id": item.ServiceID, "service": item.Service, "started_at": item.Start.UTC().Format(time.RFC3339), "ended_at": item.End.UTC().Format(time.RFC3339), "duration_seconds": int(item.End.Sub(item.Start).Seconds()), "requests": item.Requests, "flags": len(item.Flags), "flow_id": item.FlowID})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if asInt(out[i]["flags"]) == asInt(out[j]["flags"]) {
+			return asInt(out[i]["requests"]) > asInt(out[j]["requests"])
+		}
+		return asInt(out[i]["flags"]) > asInt(out[j]["flags"])
+	})
+	if len(out) > 100 {
+		out = out[:100]
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *App) flagThefts(w http.ResponseWriter, r *http.Request) {
+	minutes := queryInt(r, "minutes", 120)
+	rows, err := a.db.Query(`SELECT f.id,COALESCE(s.name,''),f.service_id,f.src_ip,f.raw_response,f.created_at FROM flows f LEFT JOIN services s ON s.id = f.service_id WHERE f.created_at >= ? ORDER BY f.created_at DESC LIMIT 5000`, time.Now().Add(-time.Duration(minutes)*time.Minute).UTC().Format(time.RFC3339))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+	seen := map[string]bool{}
+	out := []map[string]any{}
+	byHour := map[string]int{}
+	for rows.Next() {
+		var id, service, srcIP, respRaw, created string
+		var sid sql.NullInt64
+		if rows.Scan(&id, &service, &sid, &srcIP, &respRaw, &created) != nil {
+			continue
+		}
+		serviceID := 0
+		if sid.Valid {
+			serviceID = int(sid.Int64)
+		}
+		for _, flag := range extractFlags(flowMatchText(a.hydratePayloadMap(parseJSONMap(respRaw)), 0)) {
+			key := srcIP + "|" + flag
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			if t, err := time.Parse(time.RFC3339, created); err == nil {
+				byHour[t.UTC().Truncate(time.Hour).Format(time.RFC3339)]++
+			}
+			out = append(out, map[string]any{"flow_id": id, "service_id": serviceID, "service": service, "attacker_ip": srcIP, "flag": flag, "created_at": created})
+		}
+	}
+	series := []map[string]any{}
+	for ts, count := range byHour {
+		series = append(series, map[string]any{"ts": ts, "flags": count})
+	}
+	sort.Slice(series, func(i, j int) bool { return fmt.Sprint(series[i]["ts"]) < fmt.Sprint(series[j]["ts"]) })
+	writeJSON(w, http.StatusOK, map[string]any{"total_flags": len(out), "items": out, "series": series})
+}
+
+func (a *App) setting(key string) string {
+	var value string
+	_ = a.db.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
+	return value
+}
+
+func queryInt(r *http.Request, key string, def int) int {
+	v, err := strconv.Atoi(r.URL.Query().Get(key))
+	if err != nil {
+		return def
+	}
+	return v
+}
+
+func extractFlags(src string) []string {
+	re := regexp.MustCompile(`(?i)([a-z0-9_]+\{[^\s{}]{4,128}\}|flag\{[^\s{}]{4,128}\}|test\{[^\s{}]{4,128}\})`)
+	matches := re.FindAllString(src, -1)
+	out := []string{}
+	seen := map[string]bool{}
+	for _, match := range matches {
+		flag := strings.TrimSpace(match)
+		if flag != "" && !seen[flag] {
+			seen[flag] = true
+			out = append(out, flag)
+		}
+	}
+	return out
 }
 
 func incStat(m map[string]any, key string) { m[key] = asInt(m[key]) + 1 }
