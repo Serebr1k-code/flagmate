@@ -2777,7 +2777,7 @@ func queryInt(r *http.Request, key string, def int) int {
 }
 
 func extractFlags(src string) []string {
-	re := regexp.MustCompile(`(?i)([a-z0-9_]+\{[^\s{}]{4,128}\}|flag\{[^\s{}]{4,128}\}|test\{[^\s{}]{4,128}\})`)
+	re := regexp.MustCompile(`(?i)(flag\{[^\s{}]{4,128}\}|\b[A-Za-z0-9_+\-=]{24}\b|\b[A-Za-z0-9_+\-=]{32}\b|\b[A-Za-z0-9_+\-=]{48}\b)`)
 	matches := re.FindAllString(src, -1)
 	out := []string{}
 	seen := map[string]bool{}
@@ -2792,7 +2792,7 @@ func extractFlags(src string) []string {
 }
 
 func defaultFlagRegex() string {
-	return `(?i)(?:[a-z0-9_]+\{[^\s{}]{4,128}\}|flag\{[^\s{}]{4,128}\}|test\{[^\s{}]{4,128}\}|\b[A-Za-z0-9_+\-=]{24}\b|\b[A-Za-z0-9_+\-=]{32}\b|\b[A-Za-z0-9_+\-=]{48}\b)`
+	return `(?i)(?:flag\{[^\s{}]{4,128}\}|\b[A-Za-z0-9_+\-=]{24}\b|\b[A-Za-z0-9_+\-=]{32}\b|\b[A-Za-z0-9_+\-=]{48}\b)`
 }
 
 func (a *App) responseMatchesFlagMark(resp map[string]any) bool {
