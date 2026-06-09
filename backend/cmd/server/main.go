@@ -1217,6 +1217,16 @@ func flowMatchText(raw map[string]any, status int) string {
 		if pretty, ok := prettyJSON(body); ok {
 			parts = append(parts, pretty)
 		}
+		for _, line := range strings.Split(body, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			if pretty, ok := prettyJSON(line); ok {
+				parts = append(parts, pretty)
+				parts = append(parts, normalizeWhitespace(pretty))
+			}
+		}
 	}
 	if status > 0 {
 		parts = append(parts, strconv.Itoa(status))
