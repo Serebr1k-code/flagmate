@@ -755,6 +755,7 @@ async function confirmUnbanPiece() {
 .client-frame b { color: #fecaca; }
 .server-frame b { color: #bbf7d0; }
 :deep(.banned-text-hit) { color: inherit; padding: 0 3px; border-radius: 3px; cursor: pointer; background-image: repeating-linear-gradient(135deg, transparent 0 4px, var(--destructive) 4px 9px, transparent 9px 13px) !important; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+:deep(.banned-text-hit:not([style])) { background-color: transparent; }
 :deep(.banned-text-hit:hover) { background-image: none !important; box-shadow: none; }
 .code-block { background-color: var(--surface); color: var(--text); }
 .empty-state { text-align: center; padding: 32px; color: var(--text-muted); }

@@ -95,6 +95,9 @@ const uniqueWords = ref<string[]>([])
 const initialBanText = ref('')
 const compromiseAlerts = ref<CompromiseAlert[]>([])
 let alertTimer: ReturnType<typeof setInterval> | null = null
+let dashboardSocket: WebSocket | null = null
+let dashboardReconnectTimer: ReturnType<typeof setTimeout> | null = null
+let selectedRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 interface CompromiseAlert { key: string; flow_id: string; service: string; attacker_ip: string; flag: string; created_at: string; expires_at: number }
 
@@ -261,14 +264,53 @@ function dismissAlert(key: string) {
   compromiseAlerts.value = compromiseAlerts.value.filter(alert => alert.key !== key)
 }
 
+function connectDashboardSocket() {
+  if (dashboardSocket && (dashboardSocket.readyState === WebSocket.OPEN || dashboardSocket.readyState === WebSocket.CONNECTING)) return
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  dashboardSocket = new WebSocket(`${proto}://${window.location.host}/ws`)
+  dashboardSocket.onmessage = event => {
+    try {
+      const flow = JSON.parse(event.data)
+      if (selectedFlow.value && flow.id === selectedFlow.value.id) scheduleSelectedFlowRefresh(flow.id)
+    } catch {}
+    fetchCompromiseAlerts()
+  }
+  dashboardSocket.onclose = () => {
+    dashboardSocket = null
+    if (!dashboardReconnectTimer) {
+      dashboardReconnectTimer = setTimeout(() => {
+        dashboardReconnectTimer = null
+        connectDashboardSocket()
+      }, 1500)
+    }
+  }
+  dashboardSocket.onerror = () => dashboardSocket?.close()
+}
+
+function scheduleSelectedFlowRefresh(flowId: string) {
+  if (selectedRefreshTimer) return
+  selectedRefreshTimer = setTimeout(async () => {
+    selectedRefreshTimer = null
+    if (!selectedFlow.value || selectedFlow.value.id !== flowId) return
+    try {
+      const { data } = await api.get(`/flows/${flowId}`)
+      selectedFlow.value = data
+    } catch (e) { console.error('Failed to refresh live selected flow:', e) }
+  }, 200)
+}
+
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
   fetchCompromiseAlerts()
+  connectDashboardSocket()
   alertTimer = setInterval(fetchCompromiseAlerts, 30_000)
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
   if (alertTimer) clearInterval(alertTimer)
+  if (dashboardReconnectTimer) clearTimeout(dashboardReconnectTimer)
+  if (selectedRefreshTimer) clearTimeout(selectedRefreshTimer)
+  dashboardSocket?.close()
 })
 </script>
 
