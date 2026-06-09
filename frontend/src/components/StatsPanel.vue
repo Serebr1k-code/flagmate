@@ -25,6 +25,34 @@
       <div class="stat-tile"><span>Mirror flags</span><b>{{ mirror.flags }}</b></div>
     </div>
 
+    <div class="card chain-card">
+      <div class="card-header">
+        <div>
+          <h3>Attack chain graph</h3>
+          <p class="text-muted">Causal view: attacker -> service -> result, grouped from attack sessions.</p>
+        </div>
+      </div>
+      <div class="chain-graph">
+        <div v-for="session in graphSessions" :key="`${session.attacker_ip}-${session.service_id}-${session.started_at}`" class="chain-row" @click="emit('openFlowId', session.flow_id)">
+          <div class="graph-node attacker">
+            <span>attacker</span>
+            <b>{{ session.attacker_ip }}</b>
+          </div>
+          <div class="graph-edge"><span></span><em>{{ session.requests }} req</em></div>
+          <div class="graph-node service">
+            <span>service</span>
+            <b>{{ session.service || `service ${session.service_id}` }}</b>
+          </div>
+          <div class="graph-edge"><span></span><em>{{ durationLabel(session.duration_seconds) }}</em></div>
+          <div class="graph-node result" :class="session.flags > 0 ? 'compromised' : 'probing'">
+            <span>{{ session.flags > 0 ? 'compromised' : 'probing' }}</span>
+            <b>{{ session.flags }} flags</b>
+          </div>
+        </div>
+        <div v-if="graphSessions.length === 0" class="empty-state">No attack chains yet</div>
+      </div>
+    </div>
+
     <div class="card">
       <div class="card-header">
         <div>
@@ -121,6 +149,7 @@ interface StatItem { target_ip?: string; hash?: string; name?: string; requests:
 interface MirrorStats { total_requests: number; successes: number; success_rate: number; flags: number; teams: StatItem[]; groups: StatItem[]; series: Record<string, unknown> }
 
 const maxTheftFlags = computed(() => Math.max(1, ...thefts.value.series.map(point => point.flags)))
+const graphSessions = computed(() => sessions.value.slice().sort((a, b) => b.flags - a.flags || b.requests - a.requests).slice(0, 8))
 
 async function fetchAll() {
   try {
@@ -169,7 +198,21 @@ onMounted(fetchAll)
 .clickable:hover { border-color: var(--primary); }
 .flag-chip { border: 1px solid var(--destructive); color: var(--destructive); border-radius: 999px; padding: 2px 8px; font-size: 12px; }
 .stats-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.chain-card { overflow: hidden; }
+.chain-graph { display: flex; flex-direction: column; gap: 12px; padding-top: 8px; }
+.chain-row { display: grid; grid-template-columns: 1fr 120px 1fr 120px 1fr; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--border); border-radius: 16px; background: radial-gradient(circle at 10% 50%, rgba(59,130,246,.14), transparent 28%), radial-gradient(circle at 90% 50%, rgba(239,68,68,.16), transparent 30%), var(--surface); cursor: pointer; }
+.chain-row:hover { border-color: var(--primary); transform: translateY(-1px); }
+.graph-node { min-height: 76px; border: 1px solid var(--border); border-radius: 16px; padding: 12px; display: flex; flex-direction: column; justify-content: center; gap: 6px; box-shadow: inset 0 0 24px rgba(255,255,255,.03); }
+.graph-node span { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+.graph-node b { overflow-wrap: anywhere; }
+.graph-node.attacker { background: rgba(239, 68, 68, .16); border-color: rgba(239, 68, 68, .45); }
+.graph-node.service { background: rgba(59, 130, 246, .14); border-color: rgba(59, 130, 246, .45); }
+.graph-node.result.compromised { background: rgba(239, 68, 68, .20); border-color: var(--destructive); }
+.graph-node.result.probing { background: rgba(245, 158, 11, .14); border-color: rgba(245, 158, 11, .45); }
+.graph-edge { display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; }
+.graph-edge span { width: 100%; height: 3px; border-radius: 999px; background: linear-gradient(90deg, transparent, var(--primary), transparent); position: relative; }
+.graph-edge span::after { content: ''; position: absolute; right: 0; top: 50%; width: 9px; height: 9px; border-top: 3px solid var(--primary); border-right: 3px solid var(--primary); transform: translateY(-50%) rotate(45deg); }
 .mono { font-family: 'JetBrains Mono', monospace; }
 .empty-state { padding: 18px; text-align: center; color: var(--text-muted); }
-@media (max-width: 900px) { .settings-card, .stats-grid, .stats-grid.compact, .stats-columns { grid-template-columns: 1fr; } .stat-row, .session-row { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .settings-card, .stats-grid, .stats-grid.compact, .stats-columns, .chain-row { grid-template-columns: 1fr; } .graph-edge { display: none; } .stat-row, .session-row { grid-template-columns: 1fr; } }
 </style>

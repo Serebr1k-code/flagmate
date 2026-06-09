@@ -1,4 +1,14 @@
 <template>
+  <div v-if="compromiseAlerts.length" class="alert-stack">
+    <div v-for="alert in compromiseAlerts" :key="alert.key" class="compromise-alert">
+      <div>
+        <b>First compromise detected</b>
+        <span>{{ alert.service || 'unknown service' }} leaked {{ alert.flag }} to {{ alert.attacker_ip }}</span>
+      </div>
+      <button class="alert-link" @click="onOpenFlowId(alert.flow_id)">open flow</button>
+      <button class="alert-close" @click="dismissAlert(alert.key)">x</button>
+    </div>
+  </div>
   <div class="dashboard">
     <aside class="sidebar">
       <div class="sidebar-header">
@@ -83,6 +93,10 @@ const showWordPicker = ref(false)
 const wordPickerFlow = ref<Flow | null>(null)
 const uniqueWords = ref<string[]>([])
 const initialBanText = ref('')
+const compromiseAlerts = ref<CompromiseAlert[]>([])
+let alertTimer: ReturnType<typeof setInterval> | null = null
+
+interface CompromiseAlert { key: string; flow_id: string; service: string; attacker_ip: string; flag: string; created_at: string; expires_at: number }
 
 const tabs = [
   { id: 'flows', label: 'Flows', component: FlowTable },
@@ -219,11 +233,52 @@ function refreshCurrentComponent() {
   setTimeout(() => { activeTab.value = key }, 0)
 }
 
-onMounted(() => window.addEventListener('keydown', handleKeydown))
-onUnmounted(() => window.removeEventListener('keydown', handleKeydown))
+async function fetchCompromiseAlerts() {
+  try {
+    const { data } = await api.get('/stats/flag-thefts', { params: { minutes: 1440 } })
+    const dismissed = dismissedAlertKeys()
+    const firstByService = new Map<number | string, any>()
+    for (const item of (data.items || []).slice().reverse()) {
+      const key = item.service_id || item.service || 'unknown'
+      if (!firstByService.has(key)) firstByService.set(key, item)
+    }
+    const now = Date.now()
+    compromiseAlerts.value = Array.from(firstByService.values()).map(item => {
+      const key = `first-compromise:${item.service_id || item.service}:${item.flag}:${item.created_at}`
+      return { key, flow_id: item.flow_id, service: item.service, attacker_ip: item.attacker_ip, flag: item.flag, created_at: item.created_at, expires_at: new Date(item.created_at).getTime() + 15 * 60_000 }
+    }).filter(alert => !dismissed.has(alert.key) && alert.expires_at > now)
+  } catch (e) { console.error('Failed to fetch compromise alerts:', e) }
+}
+
+function dismissedAlertKeys() {
+  try { return new Set(JSON.parse(localStorage.getItem('flagmate_dismissed_alerts') || '[]') as string[]) } catch { return new Set<string>() }
+}
+
+function dismissAlert(key: string) {
+  const dismissed = dismissedAlertKeys()
+  dismissed.add(key)
+  localStorage.setItem('flagmate_dismissed_alerts', JSON.stringify(Array.from(dismissed).slice(-200)))
+  compromiseAlerts.value = compromiseAlerts.value.filter(alert => alert.key !== key)
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeydown)
+  fetchCompromiseAlerts()
+  alertTimer = setInterval(fetchCompromiseAlerts, 30_000)
+})
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown)
+  if (alertTimer) clearInterval(alertTimer)
+})
 </script>
 
 <style scoped>
+.alert-stack { display: flex; flex-direction: column; gap: 8px; background: var(--background); padding: 10px 14px 0; }
+.compromise-alert { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; border: 1px solid var(--destructive); background: linear-gradient(135deg, rgba(239, 68, 68, .22), rgba(127, 29, 29, .24)); color: var(--text); border-radius: 14px; padding: 12px 14px; box-shadow: 0 12px 28px rgba(0,0,0,.18); }
+.compromise-alert div { display: flex; flex-direction: column; gap: 2px; }
+.compromise-alert b { color: #fecaca; text-transform: uppercase; font-size: 12px; letter-spacing: .06em; }
+.alert-link, .alert-close { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.alert-close { color: var(--destructive); font-weight: 800; }
 .dashboard { display: flex; min-height: 100vh; }
 .sidebar { width: 240px; background-color: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 16px; flex-shrink: 0; }
 .sidebar-header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 16px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }

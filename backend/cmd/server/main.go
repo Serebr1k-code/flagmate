@@ -2314,7 +2314,7 @@ func (a *App) recalculateAllFlowBans() {
 		log.Printf("recalculate banned flows query error: %v", err)
 		return
 	}
-	updates := map[string]bool{}
+	updates := map[string]Flow{}
 	for rows.Next() {
 		flow, err := scanFlow(rows)
 		if err != nil {
@@ -2323,14 +2323,16 @@ func (a *App) recalculateAllFlowBans() {
 		a.hydrateFlowPayloads(&flow)
 		shouldBan := !flow.Checker && len(a.matchingPatterns(flow)) > 0
 		if shouldBan != flow.Banned {
-			updates[flow.ID] = shouldBan
+			flow.Banned = shouldBan
+			updates[flow.ID] = flow
 		}
 	}
 	_ = rows.Close()
-	for id, shouldBan := range updates {
-		if _, err := a.db.Exec(`UPDATE flows SET banned = ? WHERE id = ?`, boolInt(shouldBan), id); err != nil {
+	for id, flow := range updates {
+		if _, err := a.db.Exec(`UPDATE flows SET banned = ? WHERE id = ?`, boolInt(flow.Banned), id); err != nil {
 			log.Printf("recalculate banned flow update error: %v", err)
 		}
+		a.broadcastFlow(flow)
 	}
 }
 
