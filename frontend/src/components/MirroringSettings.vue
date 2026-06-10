@@ -114,18 +114,20 @@
     <div class="card target-card">
       <div class="card-header">
         <h3 class="card-title">Mirror teams</h3>
-        <p class="text-muted">Only IPs are stored. Flagmate sends every service to the same port number as that service.</p>
+          <p class="text-muted">Set a team IP and optional port override. Empty/0 port mirrors to the original service port.</p>
       </div>
       <div class="targets-list">
         <div v-for="(target, index) in config.targets" :key="index" class="target-item">
-          <span class="mono">{{ target.ip }}:&lt;service port&gt;</span>
+          <span class="mono">{{ target.ip }}:{{ target.port || '<service port>' }}</span>
+          <input v-model.number="target.port" class="input target-port" type="number" min="0" max="65535" placeholder="port" @change="saveConfig" />
           <button class="btn btn-sm btn-destructive" @click="removeTarget(index)">Remove</button>
         </div>
         <div v-if="config.targets.length === 0" class="empty-state">No mirror targets</div>
       </div>
       <div class="add-target-form">
         <input v-model="newTargetIp" class="input" placeholder="Team IP" />
-        <button class="btn btn-primary" @click="addTarget">Add IP</button>
+        <input v-model.number="newTargetPort" class="input target-port" type="number" min="0" max="65535" placeholder="Port override" />
+        <button class="btn btn-primary" @click="addTarget">Add target</button>
         <button class="btn btn-outline" @click="saveConfig" :disabled="saving">{{ saving ? 'Saving...' : 'Save' }}</button>
       </div>
     </div>
@@ -142,6 +144,7 @@ const services = ref<Service[]>([])
 const mirroredGroups = ref<FlowGroup[]>([])
 const draftNames = ref<Record<string, string>>({})
 const newTargetIp = ref('')
+const newTargetPort = ref(0)
 const saving = ref(false)
 const expandedGroup = ref('')
 const selectedAttemptKey = ref('')
@@ -176,13 +179,12 @@ const chartSeries = computed(() => stats.value.series[activeBucket.value] || [])
 
 function serviceConfig(serviceId: number): ServiceMirrorConfig {
   let cfg = config.value.services.find(s => s.service_id === serviceId)
-  if (!cfg) {
-    cfg = { service_id: serviceId, enabled: true, interval_seconds: 60, targets: [] }
-    config.value.services.push(cfg)
-  }
-  cfg.enabled = true
-  cfg.targets = []
-  if (!cfg.interval_seconds || cfg.interval_seconds < 1) cfg.interval_seconds = 60
+	if (!cfg) {
+		cfg = { service_id: serviceId, enabled: true, interval_seconds: 60, targets: [] }
+		config.value.services.push(cfg)
+	}
+	cfg.enabled = true
+	if (!cfg.interval_seconds || cfg.interval_seconds < 1) cfg.interval_seconds = 60
   return cfg
 }
 
@@ -196,11 +198,12 @@ async function toggleMirroring() {
 }
 
 function addTarget() {
-  const ip = newTargetIp.value.trim()
-  if (!ip) return
-  config.value.targets.push({ ip, port: 0 })
-  newTargetIp.value = ''
-  saveConfig()
+	const ip = newTargetIp.value.trim()
+	if (!ip) return
+	config.value.targets.push({ ip, port: Number(newTargetPort.value) || 0 })
+	newTargetIp.value = ''
+	newTargetPort.value = 0
+	saveConfig()
 }
 
 function removeTarget(index: number) {
@@ -307,7 +310,8 @@ onMounted(fetchConfig)
 .interval-input { -moz-appearance: textfield; appearance: textfield; }
 .mirrored-list, .targets-list { display: flex; flex-direction: column; gap: 8px; }
 .mirror-group-wrap { display: flex; flex-direction: column; gap: 8px; }
-.mirror-group, .target-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background-color: var(--surface); }
+.mirror-group { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background-color: var(--surface); }
+.target-item { display: grid; grid-template-columns: 1fr 120px auto; align-items: center; gap: 12px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background-color: var(--surface); }
 .mirror-group { cursor: pointer; }
 .mirror-group:hover { background-color: var(--surface-hover); }
 .group-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 6px; }
@@ -316,6 +320,7 @@ onMounted(fetchConfig)
 .small { font-size: 12px; }
 .add-target-form { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .add-target-form .input { flex: 1; min-width: 180px; }
+.target-port { max-width: 140px; }
 .card-header { margin-bottom: 12px; }
 .card-title { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
 .team-drilldown { padding: 10px; border: 1px dashed var(--border); border-radius: 10px; background: color-mix(in srgb, var(--surface) 65%, transparent); }

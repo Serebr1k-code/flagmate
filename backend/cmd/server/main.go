@@ -3145,7 +3145,9 @@ func (a *App) mirrorMarkedServiceGroups(cfg ServiceMirrorConfig, targets []Mirro
 		a.enrichFlow(&flow)
 		payload, _ := json.Marshal(map[string]any{"type": "flagmate_mirror", "service_id": cfg.ServiceID, "hash": hash, "flow": flow})
 		for _, target := range targets {
-			target.Port = servicePort
+			if target.Port < 1 {
+				target.Port = servicePort
+			}
 			success, flag, response := false, "", ""
 			if isWebSocketFlow(flow) {
 				success, flag, response = a.sendWebSocketMirror(target, flow)
