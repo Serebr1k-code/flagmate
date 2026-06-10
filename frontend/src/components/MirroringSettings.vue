@@ -1,5 +1,26 @@
 <template>
-  <div class="mirroring-page">
+  <div v-if="selectedAttempt" class="mirroring-page attempt-detail-page">
+    <div class="page-header">
+      <div>
+        <h1>Mirror attempt</h1>
+        <p class="text-muted mono">{{ selectedAttempt.target_ip }}:{{ selectedAttempt.target_port }} · {{ formatTime(selectedAttempt.created_at) }}</p>
+      </div>
+      <button class="btn btn-outline" @click="selectedAttempt = null">Back to mirroring</button>
+    </div>
+    <div class="card attempt-detail-card">
+      <div class="attempt-summary-grid">
+        <div><span>Status</span><b :class="selectedAttempt.success ? 'text-success' : 'text-danger'">{{ selectedAttempt.success ? 'success' : 'miss' }}</b></div>
+        <div><span>Target</span><b class="mono">{{ selectedAttempt.target_ip }}:{{ selectedAttempt.target_port }}</b></div>
+        <div><span>Flow</span><b class="mono">{{ shortId(selectedAttempt.flow_id) }}</b></div>
+        <div><span>Flags</span><b>{{ selectedAttempt.flag || '-' }}</b></div>
+      </div>
+      <div class="attempt-transcript">
+        <div class="block-header"><span>mirror response</span></div>
+        <pre>{{ selectedAttempt.response || 'No response captured' }}</pre>
+      </div>
+    </div>
+  </div>
+  <div v-else class="mirroring-page">
     <div class="page-header">
       <div>
         <h1>Mirroring</h1>
@@ -53,12 +74,14 @@
                 {{ target.ip }} <span>{{ teamSummary(target.ip) }}</span>
               </button>
               <div v-if="selectedAttemptKey && selectedAttemptKey.startsWith(group.hash + '|')" class="attempt-list">
-                <div v-for="attempt in selectedAttempts" :key="attempt.id" class="attempt-row" :class="{ success: attempt.success }">
+                <div v-for="attempt in selectedAttempts" :key="attempt.id" class="attempt-row" :class="{ success: attempt.success }" @click="selectedAttempt = attempt">
                   <div>
-                    <b>{{ attempt.success ? 'flag' : 'miss' }}</b>
+                    <span class="attempt-status" :class="attempt.success ? 'ok' : 'miss'">{{ attempt.success ? 'success' : 'miss' }}</span>
                     <span class="mono">{{ attempt.target_ip }}:{{ attempt.target_port }}</span>
+                    <span class="mono flow-id">{{ shortId(attempt.flow_id) }}</span>
                     <span v-if="attempt.flag" class="flag-chip">{{ attempt.flag }}</span>
                   </div>
+                  <span class="attempt-preview">{{ responsePreview(attempt.response) }}</span>
                   <span class="text-muted small">{{ formatTime(attempt.created_at) }}</span>
                 </div>
                 <div v-if="selectedAttempts.length === 0" class="empty-state">No attempts for this group/team yet</div>
@@ -149,6 +172,7 @@ const saving = ref(false)
 const expandedGroup = ref('')
 const selectedAttemptKey = ref('')
 const selectedAttempts = ref<MirrorAttempt[]>([])
+const selectedAttempt = ref<MirrorAttempt | null>(null)
 const activeBucket = ref<'minute' | '10m' | '30m' | 'hour'>('10m')
 const chartBuckets = ['minute', '10m', '30m', 'hour'] as const
 const stats = ref<MirrorStats>({ total_requests: 0, successes: 0, success_rate: 0, flags: 0, teams: [], groups: [], series: { minute: [], '10m': [], '30m': [], hour: [] } })
@@ -259,6 +283,16 @@ function teamSummary(ip: string) {
   return `${team.flags} flags · ${team.success_rate}%`
 }
 
+function shortId(id: string) {
+  return id ? `${id.slice(0, 8)}...` : '-'
+}
+
+function responsePreview(response: string) {
+  const clean = String(response || '').replace(/\s+/g, ' ').trim()
+  if (!clean) return 'no response'
+  return clean.length > 120 ? clean.slice(0, 120) + '...' : clean
+}
+
 async function saveConfig() {
   saving.value = true
   try {
@@ -328,9 +362,25 @@ onMounted(fetchConfig)
 .team-pill.active { border-color: var(--primary); color: var(--primary); }
 .team-pill span { margin-left: 6px; color: var(--text-muted); font-size: 11px; }
 .attempt-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
-.attempt-row { display: flex; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 8px; background: var(--card); border: 1px solid var(--border); }
+.attempt-row { display: grid; grid-template-columns: 1.2fr 1.4fr auto; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; background: var(--card); border: 1px solid var(--border); cursor: pointer; }
+.attempt-row:hover { border-color: var(--primary); background: var(--surface-hover); }
 .attempt-row.success { border-color: var(--success); background: color-mix(in srgb, var(--success) 12%, var(--card)); }
+.attempt-row > div { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.attempt-status { padding: 2px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.attempt-status.ok { background: color-mix(in srgb, var(--success) 22%, transparent); color: var(--success); }
+.attempt-status.miss { background: color-mix(in srgb, var(--warning) 20%, transparent); color: var(--warning); }
+.attempt-preview { color: var(--text-muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.flow-id { color: var(--text-muted); font-size: 12px; }
 .flag-chip { margin-left: 8px; color: var(--success); font-family: 'JetBrains Mono', monospace; }
+.attempt-detail-page { height: 100%; overflow-y: auto; }
+.attempt-detail-card { display: flex; flex-direction: column; gap: 16px; }
+.attempt-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.attempt-summary-grid div { padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); display: flex; flex-direction: column; gap: 4px; }
+.attempt-summary-grid span { color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+.text-danger { color: var(--destructive); }
+.attempt-transcript { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }
+.attempt-transcript .block-header { padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text-muted); text-transform: uppercase; font-size: 12px; letter-spacing: .05em; }
+.attempt-transcript pre { margin: 0; padding: 14px; white-space: pre-wrap; word-break: break-word; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.55; }
 .stats-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
 .stats-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
 .stat-tile { padding: 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; }
