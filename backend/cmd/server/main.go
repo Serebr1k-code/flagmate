@@ -29,6 +29,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -1202,10 +1203,21 @@ func patternMatch(pattern, target string) bool {
 			return true
 		}
 	}
-	return strings.Contains(target, pattern) || strings.Contains(normalizeWhitespace(target), normalizeWhitespace(pattern))
+	return strings.Contains(target, pattern) || strings.Contains(normalizeWhitespace(target), normalizeWhitespace(pattern)) || strings.Contains(looseMatchText(target), looseMatchText(pattern))
 }
 
 func normalizeWhitespace(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+func looseMatchText(s string) string {
+	s = strings.ReplaceAll(s, `\\"`, `"`)
+	s = strings.ReplaceAll(s, `\"`, `"`)
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
 
 func flowMatchText(raw map[string]any, status int) string {
 	parts := []string{jsonString(raw), httpLikeText(raw, status), renderedDetailText(raw, status)}

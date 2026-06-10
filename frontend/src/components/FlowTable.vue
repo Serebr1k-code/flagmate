@@ -287,8 +287,9 @@ function rowClass(flow: Flow) {
   return {
     stable: flow.stability_pct >= 70,
     banned: flow.banned,
+    checker: flow.checker,
     selected: false,
-    'negative-response': !flow.banned && !isPositiveResponse(flow.response_code),
+    'negative-response': !flow.banned && !flow.checker && !isPositiveResponse(flow.response_code),
   }
 }
 
@@ -490,12 +491,14 @@ onUnmounted(disconnectLiveSocket)
 .expand-row td { padding: 4px 0; text-align: center; color: var(--text-muted); font-size: 12px; border-bottom: 1px solid var(--border); cursor: pointer; background: color-mix(in srgb, var(--surface) 70%, transparent); }
 .expand-row:hover td { color: var(--primary); background: var(--surface-hover); }
 .end-row td { text-align: center; color: var(--text-muted); font-size: 12px; padding: 12px; background: color-mix(in srgb, var(--surface) 70%, transparent); }
-.flow-row.negative-response td { background-color: rgba(245, 158, 11, 0.12); }
-.flow-row.negative-response:hover td { background-color: rgba(245, 158, 11, 0.18); }
+.flow-row.checker td { background-color: rgba(34, 197, 94, 0.16); }
+.flow-row.checker:hover td { background-color: rgba(34, 197, 94, 0.24); }
+.flow-row.negative-response td { background-color: rgba(250, 204, 21, 0.18); }
+.flow-row.negative-response:hover td { background-color: rgba(250, 204, 21, 0.26); }
 .flow-row.banned td,
-.flow-row.banned.negative-response td { background-color: color-mix(in srgb, var(--destructive) 14%, transparent); }
+.flow-row.banned.negative-response td { background-color: rgba(239, 68, 68, 0.16); }
 .flow-row.banned:hover td,
-.flow-row.banned.negative-response:hover td { background-color: color-mix(in srgb, var(--destructive) 20%, transparent); }
+.flow-row.banned.negative-response:hover td { background-color: rgba(239, 68, 68, 0.24); }
 .flow-actions-cell { min-width: 170px; }
 .flow-actions { display: flex; align-items: center; gap: 10px; }
 .table td .badge + .badge { margin-left: 4px; }

@@ -62,9 +62,6 @@
               Unban Flow
             </button>
           </div>
-          <div v-if="extractedVariables.length" class="variable-strip">
-            <span v-for="item in extractedVariables" :key="item" class="variable-chip">{{ item }}</span>
-          </div>
         </div>
 
         <div v-if="loading" class="empty-state">Loading flow history...</div>
@@ -210,11 +207,6 @@ const displayedHistory = computed(() => {
     else out.push({ flow, hiddenCount: 0 })
   }
   return out
-})
-
-const extractedVariables = computed(() => {
-  const text = `${formatRequestPayload(props.flow.raw_request, props.flow.marks || [])}\n${formatResponsePayload(props.flow.raw_response, props.flow.response_code, props.flow.marks || [])}`
-  return Array.from(new Set((text.match(/[A-Za-z0-9_+\-=./:]{6,96}/g) || []).filter(token => /(?:token|secret|flag|admin|cmd|file|path|callback|http|\/|=|\d{4,})/i.test(token)).filter(token => !/^[A-Za-z0-9+/=]{16,}$/.test(token) && !/^(BaseHTTP|Python\/)/.test(token)).slice(0, 18)))
 })
 
 async function fetchFlowHistory(reset = true) {
@@ -641,6 +633,7 @@ const variableTokens = computed(() => {
 })
 
 function isDiffToken(token: string) {
+  if (/^(flagmate_|oc_locale=|theme=)/i.test(token)) return false
   return /\d/.test(token) || token.length >= 12 || /[+=/_:-]/.test(token)
 }
 
@@ -780,8 +773,6 @@ async function confirmUnbanPiece() {
 .summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 12px; }
 .summary-item { display: flex; flex-direction: column; gap: 2px; }
 .summary-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.variable-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.variable-chip { padding: 3px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-muted); background: var(--surface); font-size: 11px; font-family: 'JetBrains Mono', monospace; }
 .transcript { margin-bottom: 16px; display: flex; flex-direction: column; gap: 10px; }
 .flow-occurrence { border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: color-mix(in srgb, var(--surface) 70%, transparent); }
 .occurrence-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
