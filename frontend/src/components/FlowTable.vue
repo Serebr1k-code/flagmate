@@ -178,7 +178,7 @@ defineProps<{ selectedFlow?: Flow | null }>()
 
 const flows = ref<Flow[]>([])
 const page = ref(1)
-const pageSize = 100
+const pageSize = 50
 const searchQuery = ref('')
 const serviceFilter = ref('')
 const showBanned = ref(true)

@@ -139,6 +139,7 @@ type App struct {
 	mirroring        MirroringConfig
 	mirrorDue        map[int]time.Time
 	poisonMu         sync.Mutex
+	recalcMu         sync.Mutex
 	poisonHits       map[string][]time.Time
 	poisonFlagMinute int64
 	poisonFlag       string
@@ -1472,11 +1473,6 @@ func (a *App) enrichFlow(f *Flow) {
 	f.Mirrored = a.isMirroredGroup(f.Hash)
 	f.GroupName = a.groupName(f.Hash)
 	_ = a.db.QueryRow(`SELECT COUNT(*) FROM flows WHERE hash = ?`, f.Hash).Scan(&f.GroupCount)
-	liveBanned := !f.Checker && len(a.matchingPatterns(*f)) > 0
-	if liveBanned != f.Banned {
-		f.Banned = liveBanned
-		_, _ = a.db.Exec(`UPDATE flows SET banned = ? WHERE id = ?`, boolInt(liveBanned), f.ID)
-	}
 	f.Marks = a.matchingMarks(*f)
 }
 
@@ -1677,7 +1673,6 @@ func (a *App) listPatterns(w http.ResponseWriter, r *http.Request) {
 				p.ServiceID = intPtr(int(sid.Int64))
 			}
 			p.Active = active == 1
-			p.MatchCount = a.patternMatchCount(p)
 			out = append(out, p)
 		}
 	}
@@ -1759,7 +1754,7 @@ func (a *App) createPattern(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	a.recalculateAllFlowBans()
+	a.scheduleBanRecalculation()
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "ok"})
 }
 
@@ -1842,7 +1837,7 @@ func (a *App) deletePattern(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	a.recalculateAllFlowBans()
+	a.scheduleBanRecalculation()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -1860,7 +1855,7 @@ func (a *App) togglePattern(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	a.recalculateAllFlowBans()
+	a.scheduleBanRecalculation()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -2013,7 +2008,7 @@ func (a *App) banMark(w http.ResponseWriter, r *http.Request) {
 		_, _ = a.db.Exec(`INSERT INTO patterns(service_id,pattern,description,mode,active,created_at) SELECT ?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM patterns WHERE service_id = ? AND pattern = ?)`, serviceID, mark.Regex, "Ban from mark: "+markLabel(mark), "B", 1, time.Now().UTC().Format(time.RFC3339), serviceID, mark.Regex)
 		count++
 	}
-	a.recalculateAllFlowBans()
+	a.scheduleBanRecalculation()
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "services": count})
 }
 
@@ -2028,7 +2023,7 @@ func (a *App) unbanMark(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	a.recalculateAllFlowBans()
+	a.scheduleBanRecalculation()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -2202,7 +2197,7 @@ func (a *App) labelFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.Checker {
-		a.recalculateAllFlowBans()
+		a.scheduleBanRecalculation()
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -2243,7 +2238,7 @@ func (a *App) unbanFlow(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	a.recalculateAllFlowBans()
+	a.scheduleBanRecalculation()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -2268,7 +2263,7 @@ func (a *App) removeMatchingPatternsForFlow(w http.ResponseWriter, r *http.Reque
 		_, _ = a.db.Exec(`DELETE FROM patterns WHERE id = ?`, p.ID)
 	}
 	_, _ = a.db.Exec(`UPDATE flows SET banned = 0 WHERE id = ?`, flow.ID)
-	a.recalculateAllFlowBans()
+	a.scheduleBanRecalculation()
 	writeJSON(w, http.StatusOK, map[string]any{"removed": patterns})
 }
 
@@ -2320,14 +2315,27 @@ func (a *App) matchingPatterns(flow Flow) []Pattern {
 	return out
 }
 
+func (a *App) scheduleBanRecalculation() {
+	go a.recalculateAllFlowBans()
+}
+
 func (a *App) recalculateAllFlowBans() {
+	if !a.recalcMu.TryLock() {
+		return
+	}
+	defer a.recalcMu.Unlock()
 	rows, err := a.db.Query(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows`)
 	if err != nil {
 		log.Printf("recalculate banned flows query error: %v", err)
 		return
 	}
 	updates := map[string]Flow{}
+	scanned := 0
 	for rows.Next() {
+		scanned++
+		if scanned%250 == 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
 		flow, err := scanFlow(rows)
 		if err != nil {
 			continue
@@ -2497,7 +2505,7 @@ func (a *App) markFlowGroupChecker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.Checker {
-		a.recalculateAllFlowBans()
+		a.scheduleBanRecalculation()
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
