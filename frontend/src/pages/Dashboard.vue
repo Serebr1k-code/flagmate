@@ -35,27 +35,28 @@
           <button class="alert-close" @click="dismissAlert(alert.key)">x</button>
         </div>
       </div>
-      <div class="content-pane" :class="{ compact: selectedFlow }">
-        <component
-          :is="currentComponent"
-          :selected-flow="selectedFlow"
-          :selected-service-id="selectedServiceId"
-          @open-flow="onOpenFlow"
-          @open-flow-id="onOpenFlowId"
-          @open-service-stats="onOpenServiceStats"
-          @open-word-picker="onOpenWordPicker"
+      <div class="main-row">
+        <div class="content-pane" :class="{ compact: selectedFlow }">
+          <component
+            :is="currentComponent"
+            :selected-flow="selectedFlow"
+            :selected-service-id="selectedServiceId"
+            @open-flow="onOpenFlow"
+            @open-flow-id="onOpenFlowId"
+            @open-service-stats="onOpenServiceStats"
+            @open-word-picker="onOpenWordPicker"
+          />
+        </div>
+        <div v-if="selectedFlow" class="detail-column">
+          <FlowDetail class="detail-pane"
+          :flow="selectedFlow"
+          @close="selectedFlow = null"
+          @checker-toggled="onCheckerToggled"
+          @ban-clicked="onBanClicked"
+          @ban-text="onBanText"
+          @flow-updated="onFlowUpdated"
         />
-      </div>
-
-      <div v-if="selectedFlow" class="detail-column">
-        <FlowDetail class="detail-pane"
-        :flow="selectedFlow"
-        @close="selectedFlow = null"
-        @checker-toggled="onCheckerToggled"
-        @ban-clicked="onBanClicked"
-        @ban-text="onBanText"
-        @flow-updated="onFlowUpdated"
-      />
+        </div>
       </div>
     </main>
 
@@ -348,9 +349,10 @@ onUnmounted(() => {
 .nav-item.active { background-color: var(--surface-hover); color: var(--primary); font-weight: 600; }
 .sidebar-footer { padding-top: 16px; border-top: 1px solid var(--border); }
 .text-destructive { color: var(--destructive); }
-.main-content { flex: 1; padding: 24px; overflow: hidden; background-color: var(--background); display: flex; gap: 18px; min-width: 0; }
-.content-pane { flex: 1 1 auto; min-width: 0; overflow-y: auto; transition: flex-basis 0.2s ease, max-width 0.2s ease; }
-.main-content.detail-open .content-pane { flex: 0 0 280px; max-width: 280px; }
+.main-content { flex: 1; overflow: hidden; background-color: var(--background); display: flex; flex-direction: column; min-width: 0; }
+.main-row { flex: 1; display: flex; overflow: hidden; gap: 18px; padding: 24px; min-height: 0; }
+.content-pane { flex: 1; overflow-y: auto; min-width: 0; }
+.main-row:has(.detail-column) .content-pane { flex: 0 0 280px; max-width: 280px; }
 .detail-column { display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; overflow-y: auto; }
 .detail-pane { flex: 1; min-width: 0; width: 100%; }
 </style>
