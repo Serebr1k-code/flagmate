@@ -38,6 +38,16 @@ services:
       flagmate:
         ipv4_address: 172.28.0.4
 
+  testservice2:
+    image: python:3.11-alpine
+    command: ["python", "-m", "http.server", "18081"]
+    restart: unless-stopped
+    networks:
+      flagmate:
+        ipv4_address: 172.28.0.5
+    ports:
+      - "18081:18081"
+
   suricata:
     image: jasonish/suricata:latest
     command: ["suricata", "-c", "/etc/suricata/suricata.yaml", "-i", "${SURICATA_INTERFACE:-lo}", "-l", "/var/log/suricata", "-S", "/etc/suricata/rules/ctf.rules"]

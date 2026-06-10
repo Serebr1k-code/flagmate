@@ -1,14 +1,4 @@
 <template>
-  <div v-if="compromiseAlerts.length" class="alert-stack">
-    <div v-for="alert in compromiseAlerts" :key="alert.key" class="compromise-alert">
-      <div>
-        <b>First compromise detected</b>
-        <span>{{ alert.service || 'unknown service' }} leaked {{ alert.flag }} to {{ alert.attacker_ip }}</span>
-      </div>
-      <button class="alert-link" @click="onOpenFlowId(alert.flow_id)">open flow</button>
-      <button class="alert-close" @click="dismissAlert(alert.key)">x</button>
-    </div>
-  </div>
   <div class="dashboard">
     <aside class="sidebar">
       <div class="sidebar-header">
@@ -35,6 +25,16 @@
     </aside>
 
     <main class="main-content" :class="{ 'detail-open': selectedFlow }">
+      <div v-if="compromiseAlerts.length" class="alert-stack">
+        <div v-for="alert in compromiseAlerts" :key="alert.key" class="compromise-alert">
+          <div>
+            <b>First compromise detected</b>
+            <span>{{ alert.service || 'unknown service' }} leaked {{ alert.flag }} to {{ alert.attacker_ip }}</span>
+          </div>
+          <button class="alert-link" @click="onOpenFlowId(alert.flow_id)">open flow</button>
+          <button class="alert-close" @click="dismissAlert(alert.key)">x</button>
+        </div>
+      </div>
       <div class="content-pane" :class="{ compact: selectedFlow }">
         <component
           :is="currentComponent"
@@ -325,7 +325,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.alert-stack { display: flex; flex-direction: column; gap: 8px; background: var(--background); padding: 10px 14px 0; }
+.alert-stack { display: flex; flex-direction: column; gap: 8px; padding: 0 14px 8px; }
 .compromise-alert { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; border: 1px solid var(--destructive); background: linear-gradient(135deg, rgba(239, 68, 68, .22), rgba(127, 29, 29, .24)); color: var(--text); border-radius: 14px; padding: 12px 14px; box-shadow: 0 12px 28px rgba(0,0,0,.18); }
 .compromise-alert div { display: flex; flex-direction: column; gap: 2px; }
 .compromise-alert b { color: #fecaca; text-transform: uppercase; font-size: 12px; letter-spacing: .06em; }
