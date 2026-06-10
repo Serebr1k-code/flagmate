@@ -491,14 +491,14 @@ onUnmounted(disconnectLiveSocket)
 .expand-row td { padding: 4px 0; text-align: center; color: var(--text-muted); font-size: 12px; border-bottom: 1px solid var(--border); cursor: pointer; background: color-mix(in srgb, var(--surface) 70%, transparent); }
 .expand-row:hover td { color: var(--primary); background: var(--surface-hover); }
 .end-row td { text-align: center; color: var(--text-muted); font-size: 12px; padding: 12px; background: color-mix(in srgb, var(--surface) 70%, transparent); }
-.flow-row.checker td { background-color: rgba(184, 187, 38, 0.18); }
-.flow-row.checker:hover td { background-color: rgba(184, 187, 38, 0.27); }
-.flow-row.negative-response td { background-color: rgba(250, 189, 47, 0.20); }
-.flow-row.negative-response:hover td { background-color: rgba(250, 189, 47, 0.30); }
+.flow-row.checker td { background-color: rgba(104, 157, 106, 0.28); box-shadow: inset 4px 0 0 #689d6a; }
+.flow-row.checker:hover td { background-color: rgba(104, 157, 106, 0.38); }
+.flow-row.negative-response td { background-color: rgba(250, 189, 47, 0.18); box-shadow: inset 4px 0 0 #fabd2f; }
+.flow-row.negative-response:hover td { background-color: rgba(250, 189, 47, 0.28); }
 .flow-row.banned td,
-.flow-row.banned.negative-response td { background-color: rgba(251, 73, 52, 0.18); }
+.flow-row.banned.negative-response td { background-color: rgba(251, 73, 52, 0.20); box-shadow: inset 4px 0 0 #fb4934; }
 .flow-row.banned:hover td,
-.flow-row.banned.negative-response:hover td { background-color: rgba(251, 73, 52, 0.28); }
+.flow-row.banned.negative-response:hover td { background-color: rgba(251, 73, 52, 0.30); }
 .flow-actions-cell { min-width: 170px; }
 .flow-actions { display: flex; align-items: center; gap: 10px; }
 .table td .badge + .badge { margin-left: 4px; }

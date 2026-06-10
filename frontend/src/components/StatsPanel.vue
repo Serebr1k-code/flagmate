@@ -29,7 +29,7 @@
       <div class="card-header">
         <div>
           <h3>Attack chain graph</h3>
-          <p class="text-muted">Causal view: attacker -> service -> result, grouped from attack sessions.</p>
+          <p class="text-muted">Causal view: attacker -> service endpoint -> result{{ selectedServiceId ? ' · filtered by clicked service' : '' }}.</p>
         </div>
       </div>
       <div class="chain-graph">
@@ -40,8 +40,9 @@
           </div>
           <div class="graph-edge"><span></span><em>{{ session.requests }} req</em></div>
           <div class="graph-node service">
-            <span>service</span>
+            <span>service endpoint</span>
             <b>{{ session.service || `service ${session.service_id}` }}</b>
+            <small>{{ session.endpoint || 'mixed endpoints' }}</small>
           </div>
           <div class="graph-edge"><span></span><em>{{ durationLabel(session.duration_seconds) }}</em></div>
           <div class="graph-node result" :class="session.flags > 0 ? 'compromised' : 'probing'">
@@ -134,6 +135,7 @@
 import { computed, onMounted, ref } from 'vue'
 import api from '@/utils/api'
 
+const props = defineProps<{ selectedServiceId?: number | null }>()
 const emit = defineEmits<{ openFlowId: [flowId: string] }>()
 
 const minutes = ref(120)
@@ -142,14 +144,14 @@ const sessions = ref<AttackSession[]>([])
 const thefts = ref<FlagThefts>({ total_flags: 0, items: [], series: [] })
 const mirror = ref<MirrorStats>({ total_requests: 0, successes: 0, success_rate: 0, flags: 0, teams: [], groups: [], series: {} })
 
-interface AttackSession { attacker_ip: string; service_id: number; service: string; started_at: string; ended_at: string; duration_seconds: number; requests: number; flags: number; flow_id: string }
+interface AttackSession { attacker_ip: string; service_id: number; service: string; endpoint?: string; started_at: string; ended_at: string; duration_seconds: number; requests: number; flags: number; flow_id: string }
 interface FlagTheft { flow_id: string; service_id: number; service: string; attacker_ip: string; flag: string; created_at: string }
 interface FlagThefts { total_flags: number; items: FlagTheft[]; series: Array<{ ts: string; flags: number }> }
 interface StatItem { target_ip?: string; hash?: string; name?: string; requests: number; successes: number; flags: number; success_rate: number }
 interface MirrorStats { total_requests: number; successes: number; success_rate: number; flags: number; teams: StatItem[]; groups: StatItem[]; series: Record<string, unknown> }
 
 const maxTheftFlags = computed(() => Math.max(1, ...thefts.value.series.map(point => point.flags)))
-const graphSessions = computed(() => sessions.value.slice().sort((a, b) => b.flags - a.flags || b.requests - a.requests).slice(0, 8))
+const graphSessions = computed(() => sessions.value.slice().filter(session => !props.selectedServiceId || session.service_id === props.selectedServiceId).sort((a, b) => b.flags - a.flags || b.requests - a.requests).slice(0, 8))
 
 async function fetchAll() {
   try {
@@ -205,6 +207,7 @@ onMounted(fetchAll)
 .graph-node { min-height: 76px; border: 1px solid var(--border); border-radius: 16px; padding: 12px; display: flex; flex-direction: column; justify-content: center; gap: 6px; box-shadow: inset 0 0 24px rgba(255,255,255,.03); }
 .graph-node span { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
 .graph-node b { overflow-wrap: anywhere; }
+.graph-node small { color: var(--text-muted); overflow-wrap: anywhere; }
 .graph-node.attacker { background: rgba(239, 68, 68, .16); border-color: rgba(239, 68, 68, .45); }
 .graph-node.service { background: rgba(59, 130, 246, .14); border-color: rgba(59, 130, 246, .45); }
 .graph-node.result.compromised { background: rgba(239, 68, 68, .20); border-color: var(--destructive); }

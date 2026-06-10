@@ -39,8 +39,10 @@
         <component
           :is="currentComponent"
           :selected-flow="selectedFlow"
+          :selected-service-id="selectedServiceId"
           @open-flow="onOpenFlow"
           @open-flow-id="onOpenFlowId"
+          @open-service-stats="onOpenServiceStats"
           @open-word-picker="onOpenWordPicker"
         />
       </div>
@@ -89,6 +91,7 @@ const router = useRouter()
 const authStore = useAuthStore()
 const activeTab = ref('flows')
 const selectedFlow = ref<Flow | null>(null)
+const selectedServiceId = ref<number | null>(null)
 const showWordPicker = ref(false)
 const wordPickerFlow = ref<Flow | null>(null)
 const uniqueWords = ref<string[]>([])
@@ -120,6 +123,7 @@ const currentComponent = computed(() => {
 function switchTab(tabId: string) {
   activeTab.value = tabId
   selectedFlow.value = null
+  if (tabId !== 'stats') selectedServiceId.value = null
 }
 
 function handleKeydown(event: KeyboardEvent) {
@@ -149,6 +153,12 @@ async function onOpenFlowId(flowId: string) {
   } catch (e) {
     console.error('Failed to fetch flow:', e)
   }
+}
+
+function onOpenServiceStats(serviceId: number) {
+  selectedServiceId.value = serviceId
+  selectedFlow.value = null
+  activeTab.value = 'stats'
 }
 
 async function onBanClicked(flow: Flow) {

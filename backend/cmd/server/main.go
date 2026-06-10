@@ -2685,6 +2685,7 @@ func (a *App) attackSessions(w http.ResponseWriter, r *http.Request) {
 		End        time.Time
 		Requests   int
 		Flags      map[string]bool
+		Endpoints  map[string]int
 		FlowID     string
 	}
 	sessions := []*session{}
@@ -2706,18 +2707,20 @@ func (a *App) attackSessions(w http.ResponseWriter, r *http.Request) {
 		key := fmt.Sprintf("%s|%d", srcIP, serviceID)
 		cur := active[key]
 		if cur == nil || t.Sub(cur.End) > time.Duration(window)*time.Second {
-			cur = &session{AttackerIP: srcIP, ServiceID: serviceID, Service: service, Start: t, End: t, Flags: map[string]bool{}, FlowID: id}
+			cur = &session{AttackerIP: srcIP, ServiceID: serviceID, Service: service, Start: t, End: t, Flags: map[string]bool{}, Endpoints: map[string]int{}, FlowID: id}
 			active[key] = cur
 			sessions = append(sessions, cur)
 		}
 		cur.End = t
 		cur.Requests++
+		req := a.hydratePayloadMap(parseJSONMap(reqRaw))
+		cur.Endpoints[endpointName(req)]++
 		resp := a.hydratePayloadMap(parseJSONMap(respRaw))
 		flags := extractFlags(flowMatchText(resp, 0))
 		for _, flag := range flags {
 			cur.Flags[flag] = true
 		}
-		if len(flags) == 0 && a.flowMatchesFlagMark(a.hydratePayloadMap(parseJSONMap(reqRaw)), resp) {
+		if len(flags) == 0 && a.flowMatchesFlagMark(req, resp) {
 			cur.Flags[id] = true
 		}
 	}
@@ -2726,7 +2729,7 @@ func (a *App) attackSessions(w http.ResponseWriter, r *http.Request) {
 		if item.Requests < 2 && len(item.Flags) == 0 {
 			continue
 		}
-		out = append(out, map[string]any{"attacker_ip": item.AttackerIP, "service_id": item.ServiceID, "service": item.Service, "started_at": item.Start.UTC().Format(time.RFC3339), "ended_at": item.End.UTC().Format(time.RFC3339), "duration_seconds": int(item.End.Sub(item.Start).Seconds()), "requests": item.Requests, "flags": len(item.Flags), "flow_id": item.FlowID})
+		out = append(out, map[string]any{"attacker_ip": item.AttackerIP, "service_id": item.ServiceID, "service": item.Service, "endpoint": topEndpoint(item.Endpoints), "started_at": item.Start.UTC().Format(time.RFC3339), "ended_at": item.End.UTC().Format(time.RFC3339), "duration_seconds": int(item.End.Sub(item.Start).Seconds()), "requests": item.Requests, "flags": len(item.Flags), "flow_id": item.FlowID})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if asInt(out[i]["flags"]) == asInt(out[j]["flags"]) {
@@ -2798,6 +2801,36 @@ func queryInt(r *http.Request, key string, def int) int {
 		return def
 	}
 	return v
+}
+
+func endpointName(req map[string]any) string {
+	uri := asString(req["uri"])
+	if uri == "" {
+		uri = asString(req["url"])
+	}
+	if uri == "" {
+		return "unknown endpoint"
+	}
+	if idx := strings.Index(uri, "?"); idx >= 0 {
+		uri = uri[:idx]
+	}
+	method := asString(req["method"])
+	if method == "" {
+		return uri
+	}
+	return method + " " + uri
+}
+
+func topEndpoint(items map[string]int) string {
+	best := ""
+	bestCount := -1
+	for endpoint, count := range items {
+		if count > bestCount || (count == bestCount && endpoint < best) {
+			best = endpoint
+			bestCount = count
+		}
+	}
+	return best
 }
 
 func extractFlags(src string) []string {

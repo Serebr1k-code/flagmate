@@ -13,13 +13,13 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="service in services" :key="service.id">
+          <tr v-for="service in services" :key="service.id" class="service-row" @click="emit('open-service-stats', service.id)">
             <td class="font-medium">{{ service.name }}</td>
             <td class="mono">{{ service.port }}</td>
             <td><span class="badge badge-outline">{{ service.protocol }}</span></td>
             <td class="text-muted">{{ formatTime(service.created_at) }}</td>
             <td>
-              <button class="btn btn-sm btn-destructive" @click="deleteService(service.id)">Delete</button>
+              <button class="btn btn-sm btn-destructive" @click.stop="deleteService(service.id)">Delete</button>
             </td>
           </tr>
           <tr v-if="services.length === 0"><td colspan="5" class="empty-state">No services configured</td></tr>
@@ -73,6 +73,7 @@ import api from '@/utils/api'
 import type { Service } from '@/types'
 
 const services = ref<Service[]>([])
+const emit = defineEmits<{ 'open-service-stats': [serviceId: number] }>()
 const showForm = ref(false)
 const loading = ref(false)
 const form = ref({ name: '', port: 0, protocol: 'tcp' })
@@ -116,6 +117,7 @@ onMounted(fetchServices)
 .table th { padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); background-color: var(--surface); color: var(--text-muted); }
 .table td { padding: 12px 16px; font-size: 14px; border-bottom: 1px solid var(--border); }
 .table tbody tr:hover { filter: brightness(1.05); }
+.service-row { cursor: pointer; }
 .dialog-overlay { position: fixed; inset: 0; background-color: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 1000; display: flex; align-items: center; justify-content: center; }
 .dialog { background-color: var(--card); color: var(--card-foreground); border: 1px solid var(--border); border-radius: 12px; padding: 24px; max-width: 500px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.4); }
 .dialog-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
