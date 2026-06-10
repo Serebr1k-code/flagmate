@@ -325,7 +325,9 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.alert-stack { display: flex; flex-direction: column; gap: 8px; padding: 0 14px 8px; }
+.alert-stack { position: absolute; top: 10px; left: 14px; right: 14px; z-index: 50; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.alert-stack > .compromise-alert { pointer-events: auto; }
+.main-content { position: relative; }
 .compromise-alert { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; border: 1px solid var(--destructive); background: linear-gradient(135deg, rgba(239, 68, 68, .22), rgba(127, 29, 29, .24)); color: var(--text); border-radius: 14px; padding: 12px 14px; box-shadow: 0 12px 28px rgba(0,0,0,.18); }
 .compromise-alert div { display: flex; flex-direction: column; gap: 2px; }
 .compromise-alert b { color: #fecaca; text-transform: uppercase; font-size: 12px; letter-spacing: .06em; }
