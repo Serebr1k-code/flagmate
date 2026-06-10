@@ -24,6 +24,16 @@
       </div>
     </aside>
 
+    <div v-if="compromiseAlerts.length" class="alert-strip">
+      <div v-for="alert in compromiseAlerts" :key="alert.key" class="compromise-alert">
+        <div>
+          <b>First compromise detected</b>
+          <span>{{ alert.service || 'unknown service' }} leaked {{ alert.flag }} to {{ alert.attacker_ip }}</span>
+        </div>
+        <button class="alert-link" @click="onOpenFlowId(alert.flow_id)">open flow</button>
+        <button class="alert-close" @click="dismissAlert(alert.key)">x</button>
+      </div>
+    </div>
     <main class="main-content" :class="{ 'detail-open': selectedFlow }">
       <div class="content-pane" :class="{ compact: selectedFlow }">
         <component
@@ -38,16 +48,6 @@
       </div>
 
       <div v-if="selectedFlow" class="detail-column">
-        <div v-if="compromiseAlerts.length" class="alert-stack">
-          <div v-for="alert in compromiseAlerts" :key="alert.key" class="compromise-alert">
-            <div>
-              <b>First compromise detected</b>
-              <span>{{ alert.service || 'unknown service' }} leaked {{ alert.flag }} to {{ alert.attacker_ip }}</span>
-            </div>
-            <button class="alert-link" @click="onOpenFlowId(alert.flow_id)">open flow</button>
-            <button class="alert-close" @click="dismissAlert(alert.key)">x</button>
-          </div>
-        </div>
         <FlowDetail class="detail-pane"
         :flow="selectedFlow"
         @close="selectedFlow = null"
@@ -325,7 +325,14 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.alert-stack { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.alert-strip { position: fixed; top: 0; left: 0; right: 0; z-index: 9999; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 16px; background: linear-gradient(135deg, rgba(239,68,68,.9), rgba(127,29,29,.95)); backdrop-filter: blur(8px); }
+.alert-strip > .compromise-alert { display: flex; align-items: center; gap: 16px; max-width: 800px; width: 100%; color: #fecaca; }
+.alert-strip > .compromise-alert div { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.alert-strip > .compromise-alert b { color: #fff; text-transform: uppercase; font-size: 13px; letter-spacing: .06em; }
+.alert-strip > .compromise-alert .alert-link { border: 1px solid rgba(255,255,255,.3); background: rgba(255,255,255,.1); color: #fff; border-radius: 8px; padding: 4px 12px; cursor: pointer; font-size: 13px; }
+.alert-strip > .compromise-alert .alert-link:hover { background: rgba(255,255,255,.2); }
+.alert-strip > .compromise-alert .alert-close { border: none; background: none; color: #fca5a5; font-weight: 800; font-size: 18px; cursor: pointer; padding: 4px 8px; border-radius: 6px; }
+.alert-strip > .compromise-alert .alert-close:hover { background: rgba(255,255,255,.1); }
 .compromise-alert { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; border: 1px solid var(--destructive); background: linear-gradient(135deg, rgba(239, 68, 68, .22), rgba(127, 29, 29, .24)); color: var(--text); border-radius: 14px; padding: 12px 14px; box-shadow: 0 12px 28px rgba(0,0,0,.18); }
 .compromise-alert div { display: flex; flex-direction: column; gap: 2px; }
 .compromise-alert b { color: #fecaca; text-transform: uppercase; font-size: 12px; letter-spacing: .06em; }

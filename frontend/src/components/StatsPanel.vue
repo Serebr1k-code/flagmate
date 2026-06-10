@@ -67,12 +67,13 @@
           <option :value="1440">Last day</option>
         </select>
       </div>
-      <div class="bar-chart">
-        <div v-for="point in thefts.series" :key="point.ts" class="bar-wrap" :title="`${formatTime(point.ts)} · ${point.flags} flags`">
-          <div class="bar danger" :style="{ height: `${theftBarHeight(point.flags)}%` }"></div>
-        </div>
-        <div v-if="thefts.series.length === 0" class="empty-state">No stolen flags detected yet</div>
-      </div>
+      <svg class="line-chart" viewBox="0 0 400 100" preserveAspectRatio="none">
+        <polyline v-if="thefts.series.length > 1" :points="linePoints" fill="none" stroke="#fb4934" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle v-for="(point, i) in thefts.series" :key="point.ts" :cx="pointX(i)" :cy="pointY(point.flags)" r="4" fill="#fb4934" stroke="#1a0a0a" stroke-width="2"/>
+        <text v-if="thefts.series.length > 0" :x="pointX(0)" y="96" fill="#a89984" font-size="7" text-anchor="start">{{ formatTimeNoDate(thefts.series[0].ts) }}</text>
+        <text v-if="thefts.series.length > 1" :x="pointX(thefts.series.length-1)" y="96" fill="#a89984" font-size="7" text-anchor="end">{{ formatTimeNoDate(thefts.series[thefts.series.length-1].ts) }}</text>
+        <text v-if="thefts.series.length === 0" x="200" y="55" fill="#a89984" font-size="11" text-anchor="middle">No stolen flags detected yet</text>
+      </svg>
       <div class="theft-list">
         <div v-for="item in thefts.items.slice(0, 50)" :key="`${item.flow_id}-${item.flag}`" class="stat-row clickable" @click="emit('openFlowId', item.flow_id)">
           <span class="mono">{{ item.attacker_ip }}</span>
@@ -150,8 +151,16 @@ interface FlagThefts { total_flags: number; items: FlagTheft[]; series: Array<{ 
 interface StatItem { target_ip?: string; hash?: string; name?: string; requests: number; successes: number; flags: number; success_rate: number }
 interface MirrorStats { total_requests: number; successes: number; success_rate: number; flags: number; teams: StatItem[]; groups: StatItem[]; series: Record<string, unknown> }
 
-const maxTheftFlags = computed(() => Math.max(1, ...thefts.value.series.map(point => point.flags)))
+const maxFlags = computed(() => Math.max(1, ...thefts.value.series.map(p => p.flags)))
 const graphSessions = computed(() => sessions.value.slice().filter(session => !props.selectedServiceId || session.service_id === props.selectedServiceId).sort((a, b) => b.flags - a.flags || b.requests - a.requests).slice(0, 8))
+const linePoints = computed(() => thefts.value.series.map((p, i) => `${pointX(i)},${100 - pointY(p.flags)}`).join(' '))
+function pointX(i: number) { return thefts.value.series.length <= 1 ? 200 : 20 + (i / (thefts.value.series.length - 1)) * 360 }
+function pointY(flags: number) { return Math.max(2, Math.round((flags / maxFlags.value) * 80)) }
+function formatTimeNoDate(ts: string) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
 
 async function fetchAll() {
   try {
@@ -172,7 +181,6 @@ async function saveSettings() {
   try { await api.post('/stats/settings', settings.value) } catch (e) { console.error('Failed to save stats settings:', e) }
 }
 
-function theftBarHeight(flags: number) { return Math.max(8, Math.round((flags / maxTheftFlags.value) * 100)) }
 function durationLabel(seconds: number) { return seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)}m` }
 function formatTime(value: string) { return value ? new Date(value).toLocaleString() : '-' }
 
@@ -190,9 +198,7 @@ onMounted(fetchAll)
 .stat-tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px; }
 .stat-tile span, .text-muted { color: var(--text-muted); }
 .stat-tile b { font-size: 24px; }
-.bar-chart { min-height: 110px; display: flex; align-items: end; gap: 4px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
-.bar-wrap { flex: 1; min-width: 8px; height: 96px; display: flex; align-items: end; }
-.bar { width: 100%; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, #ef4444, #7f1d1d); }
+.line-chart { width: 100%; height: 110px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); margin-bottom: 12px; }
 .theft-list, .session-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 .stat-row, .session-row { display: grid; grid-template-columns: 1fr 1fr auto auto; gap: 12px; align-items: center; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .session-row { grid-template-columns: 1.4fr auto auto auto; }

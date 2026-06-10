@@ -2775,7 +2775,7 @@ func (a *App) flagThefts(w http.ResponseWriter, r *http.Request) {
 		resp := a.hydratePayloadMap(parseJSONMap(respRaw))
 		flags := extractFlags(flowMatchText(resp, 0))
 		if len(flags) == 0 && a.responseMatchesFlagMark(resp) {
-			flags = []string{"(flag mark)"}
+			flags = []string{"(flag mark: " + matchedFlagPreview(a.allMarks(), flowMatchText(resp, 0)) + ")"}
 		}
 		for _, flag := range flags {
 			key := srcIP + "|" + flag
@@ -2862,6 +2862,24 @@ func defaultFlagRegex() string {
 
 func (a *App) responseMatchesFlagMark(resp map[string]any) bool {
 	return a.flowMatchesFlagMark(nil, resp)
+}
+
+func matchedFlagPreview(marks []Mark, text string) string {
+	for _, mark := range marks {
+		if strings.EqualFold(strings.TrimSpace(mark.Name), "flag") {
+			re, err := regexp.Compile(mark.Regex)
+			if err == nil {
+				m := re.FindString(text)
+				if m != "" {
+					if len(m) > 48 {
+						m = m[:48] + "..."
+					}
+					return m
+				}
+			}
+		}
+	}
+	return "?"
 }
 
 func (a *App) flowMatchesFlagMark(req, resp map[string]any) bool {
