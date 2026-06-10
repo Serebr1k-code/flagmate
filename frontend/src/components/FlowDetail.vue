@@ -81,22 +81,22 @@
             </div>
             <div v-if="hasRequest(entry.flow)" class="transcript-block block-incoming">
               <div class="block-header"><span>client -> service</span></div>
-              <pre class="block-payload" @click.stop="openBanForHighlighted($event, entry.flow)" v-html="highlightPayload(isWebSocketFlow(entry.flow) ? formatWebSocketUpgradeRequest(entry.flow.raw_request) : formatRequestPayload(entry.flow.raw_request, entry.flow.marks || []), entry.flow.marks || [])"></pre>
+              <pre class="block-payload" data-ban-scope @click.stop="openBanForHighlighted($event, entry.flow)" v-html="highlightPayload(isWebSocketFlow(entry.flow) ? formatWebSocketUpgradeRequest(entry.flow.raw_request) : formatRequestPayload(entry.flow.raw_request, entry.flow.marks || []), entry.flow.marks || [])"></pre>
             </div>
             <div v-if="!isWebSocketFlow(entry.flow) && hasResponse(entry.flow)" class="transcript-block block-outgoing" :class="{ 'negative-response': !entry.flow.banned && !isPositiveResponse(entry.flow.response_code) }">
               <div class="block-header"><span>service -> client</span></div>
-              <pre class="block-payload" @click.stop="openBanForHighlighted($event, entry.flow)" v-html="highlightPayload(formatResponsePayload(entry.flow.raw_response, entry.flow.response_code, entry.flow.marks || []), entry.flow.marks || [])"></pre>
+              <pre class="block-payload" data-ban-scope @click.stop="openBanForHighlighted($event, entry.flow)" v-html="highlightPayload(formatResponsePayload(entry.flow.raw_response, entry.flow.response_code, entry.flow.marks || []), entry.flow.marks || [])"></pre>
             </div>
             <div v-if="isWebSocketFlow(entry.flow) && hasResponse(entry.flow)" class="transcript-block block-outgoing">
               <div class="block-header"><span>service -> client</span></div>
-              <pre class="block-payload" @click.stop="openBanForHighlighted($event, entry.flow)" v-html="highlightPayload(formatWebSocketUpgradeResponse(entry.flow.raw_response, entry.flow.response_code), entry.flow.marks || [])"></pre>
+              <pre class="block-payload" data-ban-scope @click.stop="openBanForHighlighted($event, entry.flow)" v-html="highlightPayload(formatWebSocketUpgradeResponse(entry.flow.raw_response, entry.flow.response_code), entry.flow.marks || [])"></pre>
             </div>
             <div v-if="isWebSocketFlow(entry.flow)" class="transcript-block block-ws">
               <div class="block-header"><span>websocket frames</span></div>
               <div class="frame-list">
                 <div v-for="(frame, fidx) in webSocketConversation(entry.flow)" :key="fidx" class="frame-row" :class="frame.direction === 'client' ? 'client-frame' : 'server-frame'">
                   <b>{{ frame.direction }} frame #{{ frame.index }}</b>
-                  <pre @click.stop="openBanForHighlighted($event, entry.flow)" v-html="highlightPayload(frame.text, entry.flow.marks || [])"></pre>
+                  <pre data-ban-scope @click.stop="openBanForHighlighted($event, entry.flow)" v-html="highlightPayload(frame.text, entry.flow.marks || [])"></pre>
                 </div>
               </div>
             </div>
@@ -348,10 +348,27 @@ function tryPrettyFrame(frame: string) {
 
 function openBanForSelection(event: MouseEvent) {
   if (event.ctrlKey || event.metaKey) return
-  const selection = window.getSelection()?.toString().trim()
+  const sel = window.getSelection()
+  const selection = sel?.toString().trim()
   if (!selection || selection.length < 2) return
+  if (!selectionInsideSingleBanScope(sel)) return
   emit('banText', { flow: props.flow, text: selection })
   window.getSelection()?.removeAllRanges()
+}
+
+function selectionInsideSingleBanScope(selection: Selection | null | undefined) {
+  if (!selection || selection.rangeCount === 0) return false
+  const anchor = closestBanScope(selection.anchorNode)
+  const focus = closestBanScope(selection.focusNode)
+  if (!anchor || !focus || anchor !== focus) return false
+  const common = selection.getRangeAt(0).commonAncestorContainer
+  const commonElement = common.nodeType === Node.ELEMENT_NODE ? common as Element : common.parentElement
+  return !!commonElement?.closest('[data-ban-scope]') && anchor.contains(commonElement)
+}
+
+function closestBanScope(node: Node | null) {
+  const element = node?.nodeType === Node.ELEMENT_NODE ? node as Element : node?.parentElement
+  return element?.closest('[data-ban-scope]') as HTMLElement | null
 }
 
 function openBanForHighlighted(event: MouseEvent, flow: Flow) {
@@ -528,26 +545,57 @@ function highlightPayload(text: string, marks: MarkHit[]): string {
   }
   if (!ranges.length) return escapeHTML(text)
   ranges.sort((a, b) => a.start - b.start || b.end - a.end)
-  const points = Array.from(new Set([0, text.length, ...ranges.flatMap(r => [r.start, r.end])])).filter(point => point >= 0 && point <= text.length).sort((a, b) => a - b)
+  const banRanges = mergeBanRanges(ranges.filter(r => r.kind === 'ban'))
+  const decorRanges = ranges.filter(r => r.kind !== 'ban')
+  if (banRanges.length) {
+    let out = ''
+    let cursor = 0
+    for (const ban of banRanges) {
+      out += renderDecoratedText(text, cursor, ban.start, decorRanges)
+      const inner = renderDecoratedText(text, ban.start, ban.end, decorRanges)
+      const banAttrs = ban.patternId ? ` data-unban-pattern-id="${ban.patternId}"` : ''
+      out += `<span data-ban-hit="1"${banAttrs} class="banned-text-hit">${inner}</span>`
+      cursor = ban.end
+    }
+    out += renderDecoratedText(text, cursor, text.length, decorRanges)
+    return out
+  }
+  return renderDecoratedText(text, 0, text.length, decorRanges)
+}
+
+function mergeBanRanges(ranges: Array<{ start: number; end: number; patternId?: number }>) {
+  const sorted = ranges.slice().sort((a, b) => a.start - b.start || b.end - a.end)
+  const merged: Array<{ start: number; end: number; patternId?: number }> = []
+  for (const range of sorted) {
+    const last = merged[merged.length - 1]
+    if (last && range.start <= last.end) {
+      last.end = Math.max(last.end, range.end)
+      last.patternId ||= range.patternId
+    } else {
+      merged.push({ start: range.start, end: range.end, patternId: range.patternId })
+    }
+  }
+  return merged
+}
+
+function renderDecoratedText(text: string, start: number, end: number, ranges: Array<{ start: number; end: number; color: string; kind: 'mark' | 'diff' | 'ban'; patternId?: number }>) {
+  if (start >= end) return ''
+  const local = ranges.filter(r => r.end > start && r.start < end)
+  if (!local.length) return escapeHTML(text.slice(start, end))
+  const points = Array.from(new Set([start, end, ...local.flatMap(r => [Math.max(start, r.start), Math.min(end, r.end)])])).filter(point => point >= start && point <= end).sort((a, b) => a - b)
   let out = ''
   for (let i = 0; i < points.length - 1; i++) {
-    const start = points[i]
-    const end = points[i + 1]
-    if (start === end) continue
-    const covering = ranges.filter(r => r.start <= start && r.end >= end)
-    const banRange = covering.find(r => r.kind === 'ban')
-    const banned = !!banRange
+    const segStart = points[i]
+    const segEnd = points[i + 1]
+    if (segStart === segEnd) continue
+    const covering = local.filter(r => r.start <= segStart && r.end >= segEnd)
     const base = covering.find(r => r.kind === 'mark') || covering.find(r => r.kind === 'diff')
-    const content = escapeHTML(text.slice(start, end))
-    const banAttrs = banned && banRange?.patternId ? ` data-unban-pattern-id="${banRange.patternId}"` : ''
-    if (!base && !banned) {
+    const content = escapeHTML(text.slice(segStart, segEnd))
+    if (!base) {
       out += content
-    } else if (base) {
-      const isDiff = base.kind === 'diff'
-      const klass = banned ? ' class="banned-text-hit"' : ''
-      out += `<mark data-ban-hit="1"${banAttrs}${klass} style="background:${escapeAttr(base.color)}${isDiff ? '22' : '55'};border-bottom:${isDiff ? '2px dashed' : '1px solid'} ${escapeAttr(base.color)};color:inherit;padding:0 2px;border-radius:3px;cursor:pointer">${content}</mark>`
     } else {
-      out += `<mark data-ban-hit="1"${banAttrs} class="banned-text-hit">${content}</mark>`
+      const isDiff = base.kind === 'diff'
+      out += `<mark data-ban-hit="1" style="background:${escapeAttr(base.color)}${isDiff ? '22' : '55'};border-bottom:${isDiff ? '2px dashed' : '1px solid'} ${escapeAttr(base.color)};color:inherit;padding:0 2px;border-radius:3px;cursor:pointer">${content}</mark>`
     }
   }
   return out

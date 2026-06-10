@@ -317,7 +317,7 @@ func loadConfig() Config {
 		GateEnabled:    strings.ToLower(getenv("GATE_ENABLED", "true")) == "true",
 		GateListen:     getenv("GATE_LISTEN", ":18080"),
 		GateUpstream:   strings.TrimRight(getenv("GATE_UPSTREAM", "http://testservice:18080"), "/"),
-		PoisonImageDir: getenv("POISON_IMAGE_DIR", "/app/poison-images"),
+		PoisonImageDir: "/app/poison-images",
 	}
 }
 

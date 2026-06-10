@@ -15,7 +15,6 @@ services:
       GATE_ENABLED: ${GATE_ENABLED:-true}
       GATE_LISTEN: ${GATE_LISTEN:-:18080}
       GATE_UPSTREAM: ${GATE_UPSTREAM:-http://testservice:18080}
-      POISON_IMAGE_DIR: ${POISON_IMAGE_DIR:-/app/poison-images}
     volumes:
       - ./backend-data:/data
       - ./sockets:/var/run/suricata
