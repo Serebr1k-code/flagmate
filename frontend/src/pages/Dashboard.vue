@@ -25,16 +25,6 @@
     </aside>
 
     <main class="main-content" :class="{ 'detail-open': selectedFlow }">
-      <div v-if="compromiseAlerts.length" class="alert-stack">
-        <div v-for="alert in compromiseAlerts" :key="alert.key" class="compromise-alert">
-          <div>
-            <b>First compromise detected</b>
-            <span>{{ alert.service || 'unknown service' }} leaked {{ alert.flag }} to {{ alert.attacker_ip }}</span>
-          </div>
-          <button class="alert-link" @click="onOpenFlowId(alert.flow_id)">open flow</button>
-          <button class="alert-close" @click="dismissAlert(alert.key)">x</button>
-        </div>
-      </div>
       <div class="content-pane" :class="{ compact: selectedFlow }">
         <component
           :is="currentComponent"
@@ -47,9 +37,18 @@
         />
       </div>
 
-      <FlowDetail
-        v-if="selectedFlow"
-        class="detail-pane"
+      <div v-if="selectedFlow" class="detail-column">
+        <div v-if="compromiseAlerts.length" class="alert-stack">
+          <div v-for="alert in compromiseAlerts" :key="alert.key" class="compromise-alert">
+            <div>
+              <b>First compromise detected</b>
+              <span>{{ alert.service || 'unknown service' }} leaked {{ alert.flag }} to {{ alert.attacker_ip }}</span>
+            </div>
+            <button class="alert-link" @click="onOpenFlowId(alert.flow_id)">open flow</button>
+            <button class="alert-close" @click="dismissAlert(alert.key)">x</button>
+          </div>
+        </div>
+        <FlowDetail class="detail-pane"
         :flow="selectedFlow"
         @close="selectedFlow = null"
         @checker-toggled="onCheckerToggled"
@@ -57,6 +56,7 @@
         @ban-text="onBanText"
         @flow-updated="onFlowUpdated"
       />
+      </div>
     </main>
 
     <WordPicker
@@ -325,9 +325,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.alert-stack { position: absolute; top: 10px; left: 14px; right: 14px; z-index: 50; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
-.alert-stack > .compromise-alert { pointer-events: auto; }
-.main-content { position: relative; }
+.alert-stack { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 .compromise-alert { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; border: 1px solid var(--destructive); background: linear-gradient(135deg, rgba(239, 68, 68, .22), rgba(127, 29, 29, .24)); color: var(--text); border-radius: 14px; padding: 12px 14px; box-shadow: 0 12px 28px rgba(0,0,0,.18); }
 .compromise-alert div { display: flex; flex-direction: column; gap: 2px; }
 .compromise-alert b { color: #fecaca; text-transform: uppercase; font-size: 12px; letter-spacing: .06em; }
@@ -346,5 +344,6 @@ onUnmounted(() => {
 .main-content { flex: 1; padding: 24px; overflow: hidden; background-color: var(--background); display: flex; gap: 18px; min-width: 0; }
 .content-pane { flex: 1 1 auto; min-width: 0; overflow-y: auto; transition: flex-basis 0.2s ease, max-width 0.2s ease; }
 .main-content.detail-open .content-pane { flex: 0 0 280px; max-width: 280px; }
-.detail-pane { flex: 1 1 0; min-width: 0; width: 100%; overflow-y: auto; }
+.detail-column { display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; overflow-y: auto; }
+.detail-pane { flex: 1; min-width: 0; width: 100%; }
 </style>
