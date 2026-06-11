@@ -54,7 +54,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card stolen-card">
       <div class="card-header">
         <div>
           <h3>Stolen flags over time</h3>
@@ -67,12 +67,12 @@
           <option :value="1440">Last day</option>
         </select>
       </div>
-      <svg class="line-chart" viewBox="0 0 400 100" preserveAspectRatio="none">
+      <svg class="line-chart" viewBox="0 0 400 180" preserveAspectRatio="none">
         <polyline v-if="thefts.series.length > 1" :points="linePoints" fill="none" stroke="#fb4934" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
         <circle v-for="(point, i) in thefts.series" :key="point.ts" :cx="pointX(i)" :cy="pointY(point.flags)" r="4" fill="#fb4934" stroke="#1a0a0a" stroke-width="2"/>
-        <text v-if="thefts.series.length > 0" :x="pointX(0)" y="96" fill="#a89984" font-size="7" text-anchor="start">{{ formatTimeNoDate(thefts.series[0].ts) }}</text>
-        <text v-if="thefts.series.length > 1" :x="pointX(thefts.series.length-1)" y="96" fill="#a89984" font-size="7" text-anchor="end">{{ formatTimeNoDate(thefts.series[thefts.series.length-1].ts) }}</text>
-        <text v-if="thefts.series.length === 0" x="200" y="55" fill="#a89984" font-size="11" text-anchor="middle">No stolen flags detected yet</text>
+        <text v-if="thefts.series.length > 0" :x="pointX(0)" y="168" fill="#a89984" font-size="9" text-anchor="start">{{ formatTimeNoDate(thefts.series[0].ts) }}</text>
+        <text v-if="thefts.series.length > 1" :x="pointX(thefts.series.length-1)" y="168" fill="#a89984" font-size="9" text-anchor="end">{{ formatTimeNoDate(thefts.series[thefts.series.length-1].ts) }}</text>
+        <text v-if="thefts.series.length === 0" x="200" y="95" fill="#a89984" font-size="12" text-anchor="middle">No stolen flags detected yet</text>
       </svg>
       <div class="theft-list">
         <div v-for="item in thefts.items.slice(0, 50)" :key="`${item.flow_id}-${item.flag}`" class="stat-row clickable" @click="emit('openFlowId', item.flow_id)">
@@ -153,9 +153,9 @@ interface MirrorStats { total_requests: number; successes: number; success_rate:
 
 const maxFlags = computed(() => Math.max(1, ...thefts.value.series.map(p => p.flags)))
 const graphSessions = computed(() => sessions.value.slice().filter(session => !props.selectedServiceId || session.service_id === props.selectedServiceId).sort((a, b) => b.flags - a.flags || b.requests - a.requests).slice(0, 8))
-const linePoints = computed(() => thefts.value.series.map((p, i) => `${pointX(i)},${100 - pointY(p.flags)}`).join(' '))
+const linePoints = computed(() => thefts.value.series.map((p, i) => `${pointX(i)},${pointY(p.flags)}`).join(' '))
 function pointX(i: number) { return thefts.value.series.length <= 1 ? 200 : 20 + (i / (thefts.value.series.length - 1)) * 360 }
-function pointY(flags: number) { return Math.max(2, Math.round((flags / maxFlags.value) * 80)) }
+function pointY(flags: number) { return 150 - Math.round((flags / maxFlags.value) * 120) }
 function formatTimeNoDate(ts: string) {
   if (!ts) return ''
   const d = new Date(ts)
@@ -198,9 +198,11 @@ onMounted(fetchAll)
 .stat-tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px; }
 .stat-tile span, .text-muted { color: var(--text-muted); }
 .stat-tile b { font-size: 24px; }
-.line-chart { width: 100%; height: 110px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); margin-bottom: 12px; }
+.stolen-card { min-height: 420px; }
+.line-chart { width: 100%; height: 220px; min-height: 220px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); margin-bottom: 14px; }
 .theft-list, .session-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
-.stat-row, .session-row { display: grid; grid-template-columns: 1fr 1fr auto auto; gap: 12px; align-items: center; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.theft-list { max-height: 360px; overflow-y: auto; padding-right: 4px; }
+.stat-row, .session-row { display: grid; grid-template-columns: 1fr 1fr auto auto; gap: 12px; align-items: center; min-height: 44px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .session-row { grid-template-columns: 1.4fr auto auto auto; }
 .clickable { cursor: pointer; }
 .clickable:hover { border-color: var(--primary); }
