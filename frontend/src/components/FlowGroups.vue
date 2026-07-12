@@ -8,11 +8,18 @@
       <div class="header-actions">
         <label class="text-muted">Top</label>
         <input v-model.number="topN" type="number" class="input w-20" @change="fetchGroups" />
+        <select v-model="sortBy" class="select" @change="sortGroups">
+          <option value="count">By amount</option>
+          <option value="threat">By threat</option>
+          <option value="stability">By stability</option>
+          <option value="first_seen">First seen</option>
+          <option value="last_seen">Last seen</option>
+        </select>
       </div>
     </div>
 
     <div class="group-list">
-      <div v-for="group in groups" :key="group.hash" class="group-card">
+      <div v-for="group in sortedGroups" :key="group.hash" class="group-card">
         <div class="group-main">
           <div class="group-title">
             <input
@@ -47,8 +54,10 @@ import api from '@/utils/api'
 import type { FlowGroup } from '@/types'
 
 const groups = ref<FlowGroup[]>([])
+const sortedGroups = ref<FlowGroup[]>([])
 const draftNames = ref<Record<string, string>>({})
 const topN = ref(50)
+const sortBy = ref('count')
 const emit = defineEmits<{ 'open-flow-id': [flowId: string] }>()
 
 async function fetchGroups() {
@@ -56,7 +65,38 @@ async function fetchGroups() {
     const { data } = await api.get('/flow-groups', { params: { top: topN.value } })
     groups.value = data
     for (const group of groups.value) draftNames.value[group.hash] = group.name || ''
+    sortGroups()
   } catch (e) { console.error('Failed to fetch groups:', e) }
+}
+
+function sortGroups() {
+  const s = groups.value.slice()
+  switch (sortBy.value) {
+    case 'count':
+      s.sort((a, b) => b.count - a.count)
+      break
+    case 'threat':
+      s.sort((a, b) => {
+        const aScore = (a.checker ? 0 : 1) + (a.mirrored ? 0 : 1) + Math.min(a.count, 50) / 50
+        const bScore = (b.checker ? 0 : 1) + (b.mirrored ? 0 : 1) + Math.min(b.count, 50) / 50
+        return bScore - aScore
+      })
+      break
+    case 'stability':
+      s.sort((a, b) => {
+        const aStab = a.latest_flow?.stability_pct ?? 0
+        const bStab = b.latest_flow?.stability_pct ?? 0
+        return (bStab - aStab) || (b.count - a.count)
+      })
+      break
+    case 'first_seen':
+      s.sort((a, b) => String(a.first_seen).localeCompare(String(b.first_seen)) || b.count - a.count)
+      break
+    case 'last_seen':
+      s.sort((a, b) => String(b.last_seen).localeCompare(String(a.last_seen)) || b.count - a.count)
+      break
+  }
+  sortedGroups.value = s
 }
 
 async function renameGroup(group: FlowGroup) {

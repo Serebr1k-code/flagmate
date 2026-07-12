@@ -2186,11 +2186,23 @@ func (a *App) labelFlow(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
 		return
 	}
+	var hash string
+	_ = a.db.QueryRow(`SELECT hash FROM flows WHERE id = ?`, id).Scan(&hash)
 	var err error
 	if in.Checker {
 		_, err = a.db.Exec(`UPDATE flows SET checker = 1, banned = 0 WHERE id = ?`, id)
+		if hash != "" {
+			_, _ = a.db.Exec(`INSERT INTO flow_group_meta(hash, checker, updated_at) VALUES (?, 1, ?) ON CONFLICT(hash) DO UPDATE SET checker = 1, updated_at = excluded.updated_at`, hash, time.Now().UTC().Format(time.RFC3339))
+		}
 	} else {
 		_, err = a.db.Exec(`UPDATE flows SET checker = 0 WHERE id = ?`, id)
+		if hash != "" {
+			var cnt int
+			_ = a.db.QueryRow(`SELECT COUNT(*) FROM flows WHERE hash = ? AND checker = 1`, hash).Scan(&cnt)
+			if cnt == 0 {
+				_, _ = a.db.Exec(`UPDATE flow_group_meta SET checker = 0, updated_at = ? WHERE hash = ?`, time.Now().UTC().Format(time.RFC3339), hash)
+			}
+		}
 	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

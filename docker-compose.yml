@@ -40,7 +40,9 @@ services:
 
   testservice2:
     image: python:3.11-alpine
-    command: ["python", "-m", "http.server", "18081"]
+    command: ["python", "/app/mirror_service.py"]
+    volumes:
+      - ./mirror_service.py:/app/mirror_service.py:ro
     restart: unless-stopped
     networks:
       flagmate:
