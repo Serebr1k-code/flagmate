@@ -568,7 +568,7 @@ func (a *App) startHTTPGate(ctx context.Context) {
 	}
 	gatePort := listenPortFromAddr(a.cfg.GateListen)
 	_, _ = a.db.Exec(`INSERT OR IGNORE INTO services(name,port,protocol,created_at) VALUES (?,?,?,?)`, "gate", gatePort, "tcp", time.Now().UTC().Format(time.RFC3339))
-	a.startOneGate(ctx, a.cfg.GateListen, upstream)
+	go a.startOneGate(ctx, a.cfg.GateListen, upstream)
 
 	// Start additional gates for other registered TCP services
 	rows, err := a.db.Query(`SELECT name, port FROM services WHERE protocol = 'tcp' AND port NOT IN (0, ?)`, gatePort)
@@ -583,12 +583,13 @@ func (a *App) startHTTPGate(ctx context.Context) {
 			addr := fmt.Sprintf(":%d", svcPort)
 			svcUpstream, _ := url.Parse(fmt.Sprintf("http://%s:%d", svcName, svcPort))
 			log.Printf("gate additional: %s -> %s", addr, svcUpstream)
-			a.startOneGate(ctx, addr, svcUpstream)
+			go a.startOneGate(ctx, addr, svcUpstream)
 		}
 	}
 }
 
 func (a *App) startOneGate(ctx context.Context, addr string, upstream *url.URL) {
+	log.Printf("gate listening on %s -> %s", addr, upstream)
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { a.handleGateRequest(w, r, upstream) }),
