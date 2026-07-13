@@ -359,7 +359,7 @@ func initSchema(db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
 		`INSERT OR IGNORE INTO mirroring(id, enabled, targets) VALUES (1, 0, '[]');`,
 		`INSERT OR IGNORE INTO settings(key, value) VALUES ('poison_mode', 'media');`,
-		`INSERT OR IGNORE INTO settings(key, value) VALUES ('ban_mode', '0');`,
+		`INSERT OR IGNORE INTO settings(key, value) VALUES ('ban_mode', '1');`,
 	}
 	for _, q := range queries {
 		if _, err := db.Exec(q); err != nil {
@@ -666,9 +666,20 @@ func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream
 	}
 
 	if bm == 2 && !isCheckerFlow(reqMeta, respMeta) {
+		a.storeInlineFlow(r, reqMeta, respMeta, banned)
+		hj, ok := w.(http.Hijacker)
+		if ok {
+			conn, _, _ := hj.Hijack()
+			if conn != nil {
+				go func() {
+					time.Sleep(120 * time.Second)
+					conn.Close()
+				}()
+			}
+			return
+		}
 		statusToSend = http.StatusServiceUnavailable
 		bodyToSend = []byte("")
-		resp.Header.Set("X-FlagMate-Blocked", "1")
 	}
 
 	for k := range w.Header() {
