@@ -42,7 +42,10 @@ outputs:
         filename: /var/run/suricata/eve.sock
         filetype: unix_stream
         types:
-            - http
+            - http:
+                extended: "yes"
+            - http-response-body
+            - http-request-body
 rule-files:
     - ctf.rules
 runmode: workers
