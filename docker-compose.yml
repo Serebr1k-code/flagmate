@@ -57,7 +57,7 @@ services:
       - |
         IFACE=$$(ip -o -4 route show to default | awk '{print $$5}' | head -1);
         echo "Detected interface: $$IFACE";
-        exec suricata -c /etc/suricata/suricata.yaml -i "lo" -i "$${IFACE:-eth0}" -l /var/log/suricata -S /etc/suricata/rules/ctf.rules
+        exec suricata -c /etc/suricata/suricata.yaml -i "lo" -l /var/log/suricata -S /etc/suricata/rules/ctf.rules
     network_mode: host
     cap_add:
       - NET_ADMIN
