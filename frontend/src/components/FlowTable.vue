@@ -520,7 +520,7 @@ onUnmounted(disconnectLiveSocket)
 .header-title-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .page-header h1 { font-size: 24px; font-weight: 700; margin: 0; }
 .ban-mode-switch { display: flex; align-items: center; }
-.ban-mode-switch .switch-track { position: relative; width: 210px; height: 30px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); cursor: pointer; overflow: hidden; }
+.ban-mode-switch .switch-track { position: relative; width: 280px; height: 30px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); cursor: pointer; overflow: hidden; }
 .ban-mode-switch .switch-labels { position: absolute; inset: 0; display: flex; }
 .ban-mode-switch .switch-labels span { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: .02em; z-index: 1; }
 .ban-mode-switch .switch-thumb { position: absolute; top: 2px; left: 2px; width: calc(33.333% - 4px); height: calc(100% - 4px); background: var(--primary); border-radius: 999px; transition: transform .15s; display: flex; align-items: center; justify-content: center; z-index: 2; }
