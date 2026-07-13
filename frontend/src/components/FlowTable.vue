@@ -4,13 +4,17 @@
       <div class="header-title-row">
         <h1>Flows</h1>
         <div class="ban-mode-switch">
-          <div class="switch-labels">
-            <span :class="{ active: banMode === 0 }">Manual</span>
-            <span :class="{ active: banMode === 1 }">Auto-flag</span>
-            <span :class="{ active: banMode === 2 }">Checker-only</span>
-          </div>
           <div class="switch-track" @click="cycleBanMode">
-            <div class="switch-thumb" :style="{ transform: `translateX(${banMode * 100}%)` }"></div>
+            <div class="switch-thumb" :style="{ transform: `translateX(${banMode * 100}%)` }">
+              <span v-if="banMode === 0">Manual</span>
+              <span v-else-if="banMode === 1">Auto-flag</span>
+              <span v-else>Checker-only</span>
+            </div>
+            <div class="switch-labels">
+              <span>Manual</span>
+              <span>Auto-flag</span>
+              <span>Checker-only</span>
+            </div>
           </div>
         </div>
       </div>
@@ -515,12 +519,12 @@ onUnmounted(disconnectLiveSocket)
 .page-header { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
 .header-title-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .page-header h1 { font-size: 24px; font-weight: 700; margin: 0; }
-.ban-mode-switch { display: flex; align-items: center; gap: 10px; }
-.ban-mode-switch .switch-labels { display: flex; gap: 6px; font-size: 12px; }
-.ban-mode-switch .switch-labels span { padding: 2px 8px; border-radius: 999px; color: var(--text-muted); border: 1px solid transparent; }
-.ban-mode-switch .switch-labels span.active { color: var(--text); font-weight: 600; border-color: var(--primary); }
-.ban-mode-switch .switch-track { position: relative; width: 64px; height: 28px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); cursor: pointer; overflow: hidden; }
-.ban-mode-switch .switch-thumb { width: 33.33%; height: 100%; background: var(--primary); border-radius: 999px; transition: transform .15s; }
+.ban-mode-switch { display: flex; align-items: center; }
+.ban-mode-switch .switch-track { position: relative; width: 210px; height: 30px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); cursor: pointer; overflow: hidden; }
+.ban-mode-switch .switch-labels { position: absolute; inset: 0; display: flex; }
+.ban-mode-switch .switch-labels span { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: .02em; z-index: 1; }
+.ban-mode-switch .switch-thumb { position: absolute; top: 2px; left: 2px; width: calc(33.333% - 4px); height: calc(100% - 4px); background: var(--primary); border-radius: 999px; transition: transform .15s; display: flex; align-items: center; justify-content: center; z-index: 2; }
+.ban-mode-switch .switch-thumb span { font-size: 11px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90%; }
 .header-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .header-actions .input { width: 250px; }
 .table-container { flex: 1; min-height: 0; overflow: auto; }
