@@ -540,6 +540,7 @@ onUnmounted(disconnectLiveSocket)
 .ban-mode-switch:hover .mode-tooltip { display: flex; }
 .ban-mode-switch .tooltip-row { display: flex; gap: 12px; align-items: baseline; padding: 4px 6px; border-radius: 6px; font-size: 13px; line-height: 1.4; }
 .ban-mode-switch .tooltip-row b { white-space: nowrap; color: var(--primary); min-width: 90px; flex-shrink: 0; }
+.ban-mode-switch .tooltip-row.active { background: color-mix(in srgb, var(--primary) 16%, transparent); border-radius: 6px; }
 .ban-mode-switch .tooltip-row span { color: var(--text-muted); }
 .header-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .header-actions .input { width: 250px; }
