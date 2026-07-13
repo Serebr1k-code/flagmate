@@ -1544,6 +1544,11 @@ func (a *App) enrichFlow(f *Flow) {
 	f.Mirrored = a.isMirroredGroup(f.Hash)
 	f.GroupName = a.groupName(f.Hash)
 	_ = a.db.QueryRow(`SELECT COUNT(*) FROM flows WHERE hash = ?`, f.Hash).Scan(&f.GroupCount)
+	var grpChecker int
+	_ = a.db.QueryRow(`SELECT checker FROM flow_group_meta WHERE hash = ?`, f.Hash).Scan(&grpChecker)
+	if grpChecker == 1 {
+		f.Checker = true
+	}
 	f.Marks = a.matchingMarks(*f)
 }
 
