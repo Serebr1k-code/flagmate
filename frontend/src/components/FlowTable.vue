@@ -397,7 +397,7 @@ function isPositiveResponse(code: number) {
 }
 
 function isProbablyChecker(flow: Flow) {
-  return !flow.banned && !flow.checker && (flow.group_count || 0) >= 5 && (flow.stability_pct || 0) >= 70 && (flow.marks || []).length === 0
+  return false
 }
 
 function isWebSocketFlow(flow: Flow) {

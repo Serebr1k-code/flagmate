@@ -77,6 +77,8 @@ export interface FlowGroup {
   response_code: number
   service_id: number | null
   mirrored: boolean
+  stability_pct: number
+  avg_interval: number
   latest_flow?: Flow
 }
 
