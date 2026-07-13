@@ -1,7 +1,19 @@
 <template>
   <div class="flow-table-page" :class="{ compact: selectedFlow }">
     <div class="page-header">
-      <h1>Flows</h1>
+      <div class="header-title-row">
+        <h1>Flows</h1>
+        <div class="ban-mode-switch">
+          <div class="switch-labels">
+            <span :class="{ active: banMode === 0 }">Manual</span>
+            <span :class="{ active: banMode === 1 }">Auto-flag</span>
+            <span :class="{ active: banMode === 2 }">Checker-only</span>
+          </div>
+          <div class="switch-track" @click="cycleBanMode">
+            <div class="switch-thumb" :style="{ transform: `translateX(${banMode * 100}%)` }"></div>
+          </div>
+        </div>
+      </div>
       <div class="header-actions">
         <input
           v-model="searchQuery"
@@ -184,6 +196,7 @@ const serviceFilter = ref('')
 const showBanned = ref(true)
 const showChecker = ref(true)
 const collapseDuplicates = ref(true)
+const banMode = ref(0)
 const services = ref<Service[]>([])
 const selected = ref(new Set<string>())
 const tableContainer = ref<HTMLElement | null>(null)
@@ -317,6 +330,24 @@ async function fetchServices() {
     services.value = data
   } catch (e) {
     console.error('Failed to fetch services:', e)
+  }
+}
+
+async function fetchBanMode() {
+  try {
+    const { data } = await api.get('/settings')
+    banMode.value = parseInt(String(data.ban_mode || '0'), 10) || 0
+  } catch (e) {
+    console.error('Failed to fetch ban mode:', e)
+  }
+}
+
+async function cycleBanMode() {
+  banMode.value = (banMode.value + 1) % 3
+  try {
+    await api.post('/settings', { ban_mode: String(banMode.value) })
+  } catch (e) {
+    console.error('Failed to set ban mode:', e)
   }
 }
 
@@ -461,6 +492,7 @@ async function toggleMirror(flow: Flow) {
 
 onMounted(() => {
   fetchServices()
+  fetchBanMode()
   fetchFlows(true)
   connectLiveSocket()
 })
@@ -480,9 +512,16 @@ onUnmounted(disconnectLiveSocket)
 .flow-table-page.compact .table td { padding: 10px; }
 .flow-table-page.compact .flow-row.selected td { background-color: var(--surface-hover); color: var(--primary); font-weight: 600; }
 .flow-table-page.compact .pagination { gap: 8px; font-size: 12px; }
-.page-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.page-header { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+.header-title-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .page-header h1 { font-size: 24px; font-weight: 700; margin: 0; }
-.header-actions { display: flex; gap: 8px; align-items: center; }
+.ban-mode-switch { display: flex; align-items: center; gap: 10px; }
+.ban-mode-switch .switch-labels { display: flex; gap: 6px; font-size: 12px; }
+.ban-mode-switch .switch-labels span { padding: 2px 8px; border-radius: 999px; color: var(--text-muted); border: 1px solid transparent; }
+.ban-mode-switch .switch-labels span.active { color: var(--text); font-weight: 600; border-color: var(--primary); }
+.ban-mode-switch .switch-track { position: relative; width: 64px; height: 28px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); cursor: pointer; overflow: hidden; }
+.ban-mode-switch .switch-thumb { width: 33.33%; height: 100%; background: var(--primary); border-radius: 999px; transition: transform .15s; }
+.header-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .header-actions .input { width: 250px; }
 .table-container { flex: 1; min-height: 0; overflow: auto; }
 .filter-check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); white-space: nowrap; }

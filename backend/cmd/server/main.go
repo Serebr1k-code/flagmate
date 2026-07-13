@@ -359,6 +359,7 @@ func initSchema(db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
 		`INSERT OR IGNORE INTO mirroring(id, enabled, targets) VALUES (1, 0, '[]');`,
 		`INSERT OR IGNORE INTO settings(key, value) VALUES ('poison_mode', 'media');`,
+		`INSERT OR IGNORE INTO settings(key, value) VALUES ('ban_mode', '0');`,
 	}
 	for _, q := range queries {
 		if _, err := db.Exec(q); err != nil {
@@ -632,10 +633,12 @@ func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream
 	}
 	_, svcID := a.lookupService(listenPortFromAddr(a.cfg.GateListen), listenPortFromAddr(a.cfg.GateListen))
 	banned := a.isBanned(reqMeta, respMeta, resp.StatusCode, svcID)
+	bm := a.banMode()
 
 	statusToSend := resp.StatusCode
 	bodyToSend := respBody
-	if banned {
+
+	if bm == 0 && banned {
 		poisonedBody, contentType, limited := a.buildPoisonResponse(r)
 		statusToSend = http.StatusOK
 		if limited {
@@ -650,13 +653,35 @@ func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream
 		}
 	}
 
+	if bm == 1 && banned && !isCheckerFlow(reqMeta, respMeta) {
+		bodyStr := string(respBody)
+		flagRe, _ := regexp.Compile(`(?i)(flag\{[^\s{}]{4,128}\})`)
+		if flagRe.MatchString(bodyStr) {
+			fake := "flag{poisoned_" + strconv.FormatInt(time.Now().Unix(), 36) + "_" + strconv.Itoa(len(bodyStr)) + "}"
+			bodyStr = flagRe.ReplaceAllString(bodyStr, fake)
+			respMeta["body"] = bodyStr
+			resp.Header.Set("X-FlagMate-Poisoned", "flag")
+		}
+		bodyToSend = []byte(bodyStr)
+	}
+
+	if bm == 2 && !isCheckerFlow(reqMeta, respMeta) {
+		statusToSend = http.StatusServiceUnavailable
+		bodyToSend = []byte("")
+		resp.Header.Set("X-FlagMate-Blocked", "1")
+	}
+
 	for k := range w.Header() {
 		w.Header().Del(k)
 	}
-	copyHeaders(w.Header(), resp.Header)
-	w.Header().Set("Content-Length", strconv.Itoa(len(bodyToSend)))
+	if len(bodyToSend) > 0 || statusToSend != http.StatusSwitchingProtocols {
+		copyHeaders(w.Header(), resp.Header)
+		w.Header().Set("Content-Length", strconv.Itoa(len(bodyToSend)))
+	}
 	w.WriteHeader(statusToSend)
-	_, _ = w.Write(bodyToSend)
+	if len(bodyToSend) > 0 {
+		_, _ = w.Write(bodyToSend)
+	}
 
 	a.storeInlineFlow(r, reqMeta, respMeta, banned)
 }
@@ -1157,6 +1182,20 @@ func (a *App) isStable(hash string) bool {
 	var count int
 	_ = a.db.QueryRow(`SELECT COUNT(*) FROM flows WHERE hash = ?`, hash).Scan(&count)
 	return count+1 >= a.cfg.StableN
+}
+
+func isCheckerFlow(req, resp map[string]any) bool {
+	if v, ok := resp["checker"]; ok {
+		if b, ok := v.(bool); ok && b {
+			return true
+		}
+	}
+	if v, ok := req["checker"]; ok {
+		if b, ok := v.(bool); ok && b {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) isBanned(req, resp map[string]any, status int, serviceID int) bool {
@@ -2994,7 +3033,7 @@ func (a *App) setMirroring(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) getSettings(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"poison_mode": a.poisonMode()})
+	writeJSON(w, http.StatusOK, map[string]any{"poison_mode": a.poisonMode(), "ban_mode": strconv.Itoa(a.banMode())})
 }
 
 func (a *App) setSettings(w http.ResponseWriter, r *http.Request) {
@@ -3060,6 +3099,18 @@ func (a *App) resetHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "delete_bans_services": deleteBansServices})
 }
 
+func (a *App) banMode() int {
+	var mode string
+	if err := a.db.QueryRow(`SELECT value FROM settings WHERE key = 'ban_mode'`).Scan(&mode); err != nil {
+		return 0
+	}
+	v, err := strconv.Atoi(strings.TrimSpace(mode))
+	if err != nil || v < 0 || v > 2 {
+		return 0
+	}
+	return v
+}
+
 func (a *App) poisonMode() string {
 	var mode string
 	if err := a.db.QueryRow(`SELECT value FROM settings WHERE key = 'poison_mode'`).Scan(&mode); err != nil {
@@ -3109,23 +3160,31 @@ func (a *App) runMirrorTick() {
 	a.mirrorMu.RLock()
 	cfg := a.mirroring
 	a.mirrorMu.RUnlock()
-	if !cfg.Enabled {
+	if !cfg.Enabled || len(cfg.Targets) == 0 {
 		return
 	}
-	now := time.Now()
-	for _, svc := range cfg.Services {
-		if svc.ServiceID == 0 || len(cfg.Targets) == 0 {
+	since := time.Now().Add(-12 * time.Second)
+	rows, err := a.db.Query(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows WHERE banned = 1 AND created_at >= ? ORDER BY created_at DESC LIMIT 200`, since.UTC().Format(time.RFC3339))
+	if err != nil {
+		log.Printf("mirror banned query: %v", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		flow, err := scanFlow(rows)
+		if err != nil {
 			continue
 		}
-		interval := svc.IntervalSeconds
-		if interval < 1 {
-			interval = 60
+		a.hydrateFlowPayloads(&flow)
+		a.enrichFlow(&flow)
+		for _, target := range cfg.Targets {
+			t := target
+			if t.Port < 1 && flow.ServiceID != nil {
+				t.Port = a.servicePort(*flow.ServiceID)
+			}
+			payload, _ := json.Marshal(map[string]any{"type": "flagmate_mirror", "flow": flow})
+			go a.sendMirrorPayloadRaw(t, string(payload))
 		}
-		if due, ok := a.mirrorDue[svc.ServiceID]; ok && now.Before(due) {
-			continue
-		}
-		a.mirrorDue[svc.ServiceID] = now.Add(time.Duration(interval) * time.Second)
-		go a.mirrorMarkedServiceGroups(svc, cfg.Targets)
 	}
 }
 
@@ -3169,6 +3228,17 @@ func (a *App) mirrorMarkedServiceGroups(cfg ServiceMirrorConfig, targets []Mirro
 			a.recordMirrorAttempt(cfg.ServiceID, hash, flow.ID, target, success, flag, response)
 		}
 	}
+}
+
+func (a *App) sendMirrorPayloadRaw(target MirrorTarget, payload string) {
+	addr := net.JoinHostPort(target.IP, strconv.Itoa(target.Port))
+	conn, err := net.DialTimeout("tcp", addr, 700*time.Millisecond)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	_ = conn.SetWriteDeadline(time.Now().Add(700 * time.Millisecond))
+	conn.Write([]byte(payload + "\n"))
 }
 
 func (a *App) servicePort(serviceID int) int {
