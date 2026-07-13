@@ -538,7 +538,7 @@ onUnmounted(disconnectLiveSocket)
 .ban-mode-switch .switch-thumb span { font-size: 11px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90%; }
 .ban-mode-switch .mode-tooltip { display: none; position: absolute; top: calc(100% + 8px); left: 0; width: 100%; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; box-shadow: 0 8px 24px rgba(0,0,0,.24); z-index: 50; flex-direction: column; gap: 6px; box-sizing: border-box; }
 .ban-mode-switch:hover .mode-tooltip { display: flex; }
-.ban-mode-switch .tooltip-row { display: flex; gap: 8px; align-items: baseline; padding: 4px 6px; border-radius: 6px; font-size: 12px; line-height: 1.4; }
+.ban-mode-switch .tooltip-row { display: flex; gap: 10px; align-items: baseline; padding: 5px 8px; border-radius: 6px; font-size: 13px; line-height: 1.45; }
 .ban-mode-switch .tooltip-row.active { background: color-mix(in srgb, var(--primary) 16%, transparent); }
 .ban-mode-switch .tooltip-row b { white-space: nowrap; color: var(--primary); min-width: 72px; }
 .ban-mode-switch .tooltip-row span { color: var(--text-muted); }
