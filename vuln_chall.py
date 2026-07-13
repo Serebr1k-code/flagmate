@@ -81,7 +81,7 @@ class ChallHandler(BaseHTTPRequestHandler):
 
 def http_get(path):
     try:
-        r = urllib.request.urlopen("http://127.0.0.1:{}{}".format(PORT, path), timeout=5)
+        r = urllib.request.urlopen("http://backend:{}{}".format(PORT, path), timeout=5)
         return r.read().decode()
     except Exception as e:
         return None
