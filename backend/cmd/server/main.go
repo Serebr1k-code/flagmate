@@ -566,6 +566,8 @@ func (a *App) startHTTPGate(ctx context.Context) {
 		log.Printf("gate upstream parse error: %v", err)
 		return
 	}
+	gatePort := listenPortFromAddr(a.cfg.GateListen)
+	_, _ = a.db.Exec(`INSERT OR IGNORE INTO services(name,port,protocol,created_at) VALUES (?,?,?,?)`, "gate", gatePort, "tcp", time.Now().UTC().Format(time.RFC3339))
 	server := &http.Server{
 		Addr: a.cfg.GateListen,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
