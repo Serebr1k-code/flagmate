@@ -4,16 +4,16 @@
       <div class="header-title-row">
         <h1>Flows</h1>
         <div class="ban-mode-switch">
-          <div class="switch-track" @click="cycleBanMode">
+          <div class="switch-track">
             <div class="switch-thumb" :style="{ transform: `translateX(${banMode * 100}%)` }">
               <span v-if="banMode === 0">Manual</span>
               <span v-else-if="banMode === 1">Auto-flag</span>
               <span v-else>Checker-only</span>
             </div>
             <div class="switch-labels">
-              <span>Manual</span>
-              <span>Auto-flag</span>
-              <span>Checker-only</span>
+              <span @click.stop="setBanMode(0)">Manual</span>
+              <span @click.stop="setBanMode(1)">Auto-flag</span>
+              <span @click.stop="setBanMode(2)">Checker-only</span>
             </div>
           </div>
         </div>
@@ -346,10 +346,10 @@ async function fetchBanMode() {
   }
 }
 
-async function cycleBanMode() {
-  banMode.value = (banMode.value + 1) % 3
+async function setBanMode(mode: number) {
+  banMode.value = mode
   try {
-    await api.post('/settings', { ban_mode: String(banMode.value) })
+    await api.post('/settings', { ban_mode: String(mode) })
   } catch (e) {
     console.error('Failed to set ban mode:', e)
   }
@@ -520,10 +520,10 @@ onUnmounted(disconnectLiveSocket)
 .header-title-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .page-header h1 { font-size: 24px; font-weight: 700; margin: 0; }
 .ban-mode-switch { display: flex; align-items: center; }
-.ban-mode-switch .switch-track { position: relative; width: 280px; height: 30px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); cursor: pointer; overflow: hidden; }
+.ban-mode-switch .switch-track { position: relative; width: 280px; height: 30px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); cursor: pointer; overflow: visible; }
 .ban-mode-switch .switch-labels { position: absolute; inset: 0; display: flex; }
-.ban-mode-switch .switch-labels span { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: .02em; z-index: 1; }
-.ban-mode-switch .switch-thumb { position: absolute; top: 2px; left: 2px; width: calc(33.333% - 4px); height: calc(100% - 4px); background: var(--primary); border-radius: 999px; transition: transform .15s; display: flex; align-items: center; justify-content: center; z-index: 2; }
+.ban-mode-switch .switch-labels span { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: .02em; z-index: 1; cursor: pointer; }
+.ban-mode-switch .switch-thumb { position: absolute; top: 0; left: 0; width: 33.333%; height: 100%; background: var(--primary); border-radius: 999px; transition: transform .15s; display: flex; align-items: center; justify-content: center; z-index: 2; }
 .ban-mode-switch .switch-thumb span { font-size: 11px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90%; }
 .header-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .header-actions .input { width: 250px; }
