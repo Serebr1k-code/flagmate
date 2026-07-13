@@ -1,8 +1,10 @@
+%YAML 1.1
+---
 app-layer:
     protocols:
         http:
             detection-ports:
-                dp: 80, 443, 8080, 18080, 3000
+                dp: 80, 443, 8080, 18080, 18081, 18082, 18083, 3000
             enabled: "yes"
 default-log-dir: /var/log/suricata
 default-rule-path: /etc/suricata/rules

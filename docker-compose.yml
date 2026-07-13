@@ -52,7 +52,12 @@ services:
 
   suricata:
     image: jasonish/suricata:latest
-    command: ["suricata", "-c", "/etc/suricata/suricata.yaml", "-i", "${SURICATA_INTERFACE:-lo}", "-l", "/var/log/suricata", "-S", "/etc/suricata/rules/ctf.rules"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        IFACE=$$(ip -o -4 route show to default | awk '{print $$5}' | head -1);
+        echo "Detected interface: $$IFACE";
+        exec suricata -c /etc/suricata/suricata.yaml -i "$${IFACE:-eth0}" -l /var/log/suricata -S /etc/suricata/rules/ctf.rules
     network_mode: host
     cap_add:
       - NET_ADMIN
