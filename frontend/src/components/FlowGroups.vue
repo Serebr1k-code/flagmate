@@ -35,7 +35,11 @@
           </div>
           <div class="destination mono">{{ displayGroup(group) }}</div>
           <div class="meta text-muted">
-            {{ formatTime(group.first_seen) }} → {{ formatTime(group.last_seen) }} · {{ group.hash.substring(0, 12) }}…
+            {{ formatTime(group.first_seen) }} → {{ formatTime(group.last_seen) }} ·
+            <span :class="group.stability_pct >= 70 ? 'text-success' : group.stability_pct > 0 ? 'text-warning' : ''">
+              {{ group.stability_pct }}% · {{ formatInterval(group.avg_interval) }}
+            </span>
+            · {{ group.hash.substring(0, 12) }}…
           </div>
         </div>
         <div class="actions">
@@ -123,6 +127,12 @@ function displayGroup(group: FlowGroup) {
 }
 
 function formatTime(ts: string) { return ts ? new Date(ts).toLocaleString() : '—' }
+function formatInterval(sec: number) {
+  if (!sec || sec <= 0) return '—'
+  if (sec < 60) return `${Math.round(sec)}s`
+  if (sec < 3600) return `${Math.round(sec / 60)}m ${Math.round(sec % 60)}s`
+  return `${(sec / 3600).toFixed(1)}h`
+}
 function viewExampleFlow(flowId: string) { emit('open-flow-id', flowId) }
 
 onMounted(fetchGroups)

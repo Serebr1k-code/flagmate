@@ -1635,31 +1635,39 @@ func (a *App) stabilityMetrics(hash string) (int, float64) {
 	if len(intervals) == 0 {
 		return 0, 0
 	}
-	avg := 0.0
+	sorted := make([]float64, len(intervals))
+	copy(sorted, intervals)
+	sort.Float64s(sorted)
+	median := sorted[len(sorted)/2]
+	if len(sorted)%2 == 0 {
+		median = (sorted[len(sorted)/2-1] + sorted[len(sorted)/2]) / 2
+	}
+	mean := 0.0
 	for _, v := range intervals {
-		avg += v
+		mean += v
 	}
-	avg /= float64(len(intervals))
-	if avg <= 0 {
-		return 0, 0
-	}
-	variance := 0.0
+	mean /= float64(len(intervals))
+	tolerance := median * 0.30
+	close := 0
 	for _, v := range intervals {
-		delta := v - avg
-		variance += delta * delta
+		diff := v - median
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff <= tolerance {
+			close++
+		}
 	}
-	std := math.Sqrt(variance / float64(len(intervals)))
-	variation := std / avg
-	regularity := 1 - math.Min(1, variation)
+	ratio := float64(close) / float64(len(intervals))
 	volumeBoost := math.Min(1, float64(len(intervals))/10)
-	pct := int(math.Round(100 * regularity * volumeBoost))
+	pct := int(math.Round(100 * ratio * volumeBoost))
 	if pct < 0 {
 		pct = 0
 	}
 	if pct > 100 {
 		pct = 100
 	}
-	return pct, avg
+	return pct, math.Round(median*10) / 10
 }
 
 func newFlowID() string {
