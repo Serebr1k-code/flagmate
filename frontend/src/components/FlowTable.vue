@@ -16,6 +16,17 @@
               <span @click.stop="setBanMode(2)">Checker-only</span>
             </div>
           </div>
+          <div class="mode-tooltip">
+            <div class="tooltip-row" :class="{ active: banMode === 0 }">
+              <b>Manual</b><span>Manually ban flows via patterns. Banned flows get blocked/poisoned.</span>
+            </div>
+            <div class="tooltip-row" :class="{ active: banMode === 1 }">
+              <b>Auto-flag</b><span>All traffic passes through. Flags in responses are replaced with fake ones.</span>
+            </div>
+            <div class="tooltip-row" :class="{ active: banMode === 2 }">
+              <b>Checker-only</b><span>Only checker flows get responses. Everything else gets 503.</span>
+            </div>
+          </div>
         </div>
       </div>
       <div class="header-actions">
@@ -519,12 +530,18 @@ onUnmounted(disconnectLiveSocket)
 .page-header { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
 .header-title-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .page-header h1 { font-size: 24px; font-weight: 700; margin: 0; }
-.ban-mode-switch { display: flex; align-items: center; }
+.ban-mode-switch { display: flex; align-items: center; position: relative; }
 .ban-mode-switch .switch-track { position: relative; width: 280px; height: 30px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); cursor: pointer; overflow: visible; }
 .ban-mode-switch .switch-labels { position: absolute; inset: 0; display: flex; }
 .ban-mode-switch .switch-labels span { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: .02em; z-index: 1; cursor: pointer; }
 .ban-mode-switch .switch-thumb { position: absolute; top: 0; left: 0; width: 33.333%; height: 100%; background: var(--primary); border-radius: 999px; transition: transform .15s; display: flex; align-items: center; justify-content: center; z-index: 2; }
 .ban-mode-switch .switch-thumb span { font-size: 11px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90%; }
+.ban-mode-switch .mode-tooltip { display: none; position: absolute; top: calc(100% + 8px); left: 0; width: 100%; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; box-shadow: 0 8px 24px rgba(0,0,0,.24); z-index: 50; flex-direction: column; gap: 6px; box-sizing: border-box; }
+.ban-mode-switch:hover .mode-tooltip { display: flex; }
+.ban-mode-switch .tooltip-row { display: flex; gap: 8px; align-items: baseline; padding: 4px 6px; border-radius: 6px; font-size: 12px; line-height: 1.4; }
+.ban-mode-switch .tooltip-row.active { background: color-mix(in srgb, var(--primary) 16%, transparent); }
+.ban-mode-switch .tooltip-row b { white-space: nowrap; color: var(--primary); min-width: 72px; }
+.ban-mode-switch .tooltip-row span { color: var(--text-muted); }
 .header-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .header-actions .input { width: 250px; }
 .table-container { flex: 1; min-height: 0; overflow: auto; }
