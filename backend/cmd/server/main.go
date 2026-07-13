@@ -568,24 +568,40 @@ func (a *App) startHTTPGate(ctx context.Context) {
 	}
 	gatePort := listenPortFromAddr(a.cfg.GateListen)
 	_, _ = a.db.Exec(`INSERT OR IGNORE INTO services(name,port,protocol,created_at) VALUES (?,?,?,?)`, "gate", gatePort, "tcp", time.Now().UTC().Format(time.RFC3339))
+	a.startOneGate(ctx, a.cfg.GateListen, upstream)
+
+	// Start additional gates for other registered TCP services
+	rows, err := a.db.Query(`SELECT name, port FROM services WHERE protocol = 'tcp' AND port NOT IN (0, ?)`, gatePort)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var svcName string
+			var svcPort int
+			if rows.Scan(&svcName, &svcPort) != nil {
+				continue
+			}
+			addr := fmt.Sprintf(":%d", svcPort)
+			svcUpstream, _ := url.Parse(fmt.Sprintf("http://%s:%d", svcName, svcPort))
+			log.Printf("gate additional: %s -> %s", addr, svcUpstream)
+			a.startOneGate(ctx, addr, svcUpstream)
+		}
+	}
+}
+
+func (a *App) startOneGate(ctx context.Context, addr string, upstream *url.URL) {
 	server := &http.Server{
-		Addr: a.cfg.GateListen,
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			a.handleGateRequest(w, r, upstream)
-		}),
+		Addr:              addr,
+		Handler:           http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { a.handleGateRequest(w, r, upstream) }),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		_ = server.Shutdown(shutdownCtx)
 	}()
-
-	log.Printf("http gate listening on %s -> %s", a.cfg.GateListen, a.cfg.GateUpstream)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Printf("gate server error: %v", err)
+		log.Printf("gate error (%s): %v", addr, err)
 	}
 }
 

@@ -70,6 +70,16 @@ services:
       - ./suricata-logs:/var/log/suricata
     restart: unless-stopped
 
+  chall:
+    image: python:3.11-alpine
+    command: ["python", "/app/vuln_chall.py"]
+    volumes:
+      - ./vuln_chall.py:/app/vuln_chall.py:ro
+    restart: unless-stopped
+    networks:
+      flagmate:
+        ipv4_address: 172.28.0.6
+
   frontend:
     build:
       context: ./frontend
