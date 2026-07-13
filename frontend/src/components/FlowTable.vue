@@ -538,8 +538,8 @@ onUnmounted(disconnectLiveSocket)
 .ban-mode-switch .switch-thumb span { font-size: 11px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90%; }
 .ban-mode-switch .mode-tooltip { display: none; position: absolute; top: calc(100% + 10px); left: 0; width: 100%; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 6px 8px; box-shadow: 0 8px 24px rgba(0,0,0,.24); z-index: 50; flex-direction: column; gap: 4px; box-sizing: border-box; }
 .ban-mode-switch:hover .mode-tooltip { display: flex; }
-.ban-mode-switch .tooltip-row { display: flex; gap: 8px; align-items: baseline; padding: 4px 6px; border-radius: 6px; font-size: 13px; line-height: 1.4; }
-.ban-mode-switch .tooltip-row b { white-space: nowrap; color: var(--primary); min-width: 76px; flex-shrink: 0; }
+.ban-mode-switch .tooltip-row { display: flex; gap: 12px; align-items: baseline; padding: 4px 6px; border-radius: 6px; font-size: 13px; line-height: 1.4; }
+.ban-mode-switch .tooltip-row b { white-space: nowrap; color: var(--primary); min-width: 90px; flex-shrink: 0; }
 .ban-mode-switch .tooltip-row span { color: var(--text-muted); }
 .header-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .header-actions .input { width: 250px; }
