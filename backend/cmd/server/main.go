@@ -589,10 +589,13 @@ func (a *App) startHTTPGate(ctx context.Context) {
 }
 
 func (a *App) startOneGate(ctx context.Context, addr string, upstream *url.URL) {
-	log.Printf("gate listening on %s -> %s", addr, upstream)
+	gatePort := listenPortFromAddr(addr)
+	log.Printf("gate listening on %s -> %s (svc port %d)", addr, upstream, gatePort)
 	server := &http.Server{
-		Addr:              addr,
-		Handler:           http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { a.handleGateRequest(w, r, upstream) }),
+		Addr: addr,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			a.handleGateRequest(w, r, upstream, gatePort)
+		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {
@@ -606,9 +609,9 @@ func (a *App) startOneGate(ctx context.Context, addr string, upstream *url.URL) 
 	}
 }
 
-func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream *url.URL) {
+func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream *url.URL, gatePort int) {
 	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-		a.handleGateWebSocket(w, r, upstream)
+		a.handleGateWebSocket(w, r, upstream, gatePort)
 		return
 	}
 
@@ -650,7 +653,7 @@ func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream
 		"headers": resp.Header,
 		"body":    string(respBody),
 	}
-	_, svcID := a.lookupService(listenPortFromAddr(a.cfg.GateListen), listenPortFromAddr(a.cfg.GateListen))
+	_, svcID := a.lookupService(gatePort, gatePort)
 	banned := a.isBanned(reqMeta, respMeta, resp.StatusCode, svcID)
 	bm := a.banMode()
 
@@ -685,7 +688,7 @@ func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream
 	}
 
 	if bm == 2 && !isCheckerFlow(reqMeta, respMeta) {
-		a.storeInlineFlow(r, reqMeta, respMeta, banned)
+		a.storeInlineFlow(r, reqMeta, respMeta, banned, gatePort)
 		hj, ok := w.(http.Hijacker)
 		if ok {
 			conn, _, _ := hj.Hijack()
@@ -713,10 +716,10 @@ func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream
 		_, _ = w.Write(bodyToSend)
 	}
 
-	a.storeInlineFlow(r, reqMeta, respMeta, banned)
+	a.storeInlineFlow(r, reqMeta, respMeta, banned, gatePort)
 }
 
-func (a *App) handleGateWebSocket(w http.ResponseWriter, r *http.Request, upstream *url.URL) {
+func (a *App) handleGateWebSocket(w http.ResponseWriter, r *http.Request, upstream *url.URL, gatePort int) {
 	hj, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "websocket unsupported", http.StatusInternalServerError)
@@ -771,7 +774,7 @@ func (a *App) handleGateWebSocket(w http.ResponseWriter, r *http.Request, upstre
 	reqMeta := map[string]any{"method": r.Method, "uri": r.URL.Path, "query": r.URL.RawQuery, "headers": r.Header, "body": strings.Join(decodeWebSocketTextFrames(clientCapture.bytes(), true), "\n")}
 	serverFrames := decodeWebSocketTextFrames(serverCapture.bytes(), false)
 	respMeta := map[string]any{"status": resp.StatusCode, "headers": resp.Header, "body": strings.Join(append([]string{"websocket upgrade"}, serverFrames...), "\n")}
-	a.storeInlineFlow(r, reqMeta, respMeta, false)
+	a.storeInlineFlow(r, reqMeta, respMeta, false, gatePort)
 }
 
 type captureWriter struct {
@@ -846,8 +849,8 @@ func decodeWebSocketTextFrames(raw []byte, masked bool) []string {
 	return out
 }
 
-func (a *App) storeInlineFlow(r *http.Request, reqMeta, respMeta map[string]any, banned bool) {
-	_, svcID := a.lookupService(listenPortFromAddr(a.cfg.GateListen), listenPortFromAddr(a.cfg.GateListen))
+func (a *App) storeInlineFlow(r *http.Request, reqMeta, respMeta map[string]any, banned bool, gatePort int) {
+	_, svcID := a.lookupService(gatePort, gatePort)
 	if svcID == 0 {
 		return
 	}
@@ -863,7 +866,7 @@ func (a *App) storeInlineFlow(r *http.Request, reqMeta, respMeta map[string]any,
 	flow := Flow{
 		ID:           newFlowID(),
 		ServiceID:    intPtr(svcID),
-		Direction:    fmt.Sprintf("%s:%d -> gate:%d", clientIP, clientPort, listenPortFromAddr(a.cfg.GateListen)),
+		Direction:    fmt.Sprintf("%s:%d -> gate:%d", clientIP, clientPort, gatePort),
 		RawRequest:   reqMeta,
 		RawResponse:  respMeta,
 		Hash:         hash,
@@ -875,7 +878,7 @@ func (a *App) storeInlineFlow(r *http.Request, reqMeta, respMeta map[string]any,
 		SrcIP:        clientIP,
 		DstIP:        "gate",
 		SrcPort:      clientPort,
-		DstPort:      listenPortFromAddr(a.cfg.GateListen),
+		DstPort:      gatePort,
 		Proto:        proto,
 		PktCount:     1,
 		BytesIn:      len(jsonString(reqMeta)),
