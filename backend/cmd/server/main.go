@@ -567,7 +567,6 @@ func (a *App) startHTTPGate(ctx context.Context) {
 		return
 	}
 	gatePort := listenPortFromAddr(a.cfg.GateListen)
-	_, _ = a.db.Exec(`INSERT OR IGNORE INTO services(name,port,protocol,created_at) VALUES (?,?,?,?)`, "gate", gatePort, "tcp", time.Now().UTC().Format(time.RFC3339))
 	go a.startOneGate(ctx, a.cfg.GateListen, upstream)
 
 	// Start additional gates for other registered TCP services
