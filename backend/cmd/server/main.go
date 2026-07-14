@@ -680,6 +680,7 @@ func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream
 	if bm == 1 && !isCheckerFlow(reqMeta, respMeta) {
 		bodyStr := string(respBody)
 		flagRe, _ := regexp.Compile(`(?i)(?:flag\{[^\s{}]{25}\}|\b[A-Za-z0-9_+\-=]{31}\b)`)
+		log.Printf("AUTOFLAG bm=%d checker=%v matched=%v body=%.80s", bm, isCheckerFlow(reqMeta, respMeta), flagRe.MatchString(bodyStr), bodyStr)
 		if flagRe.MatchString(bodyStr) {
 			banned = true
 			fake := genFakeFlag()
@@ -1554,15 +1555,6 @@ func (a *App) enrichFlow(f *Flow) {
 	f.Mirrored = a.isMirroredGroup(f.Hash)
 	f.GroupName = a.groupName(f.Hash)
 	_ = a.db.QueryRow(`SELECT COUNT(*) FROM flows WHERE hash = ?`, f.Hash).Scan(&f.GroupCount)
-	var grpChecker int
-	_ = a.db.QueryRow(`SELECT checker FROM flow_group_meta WHERE hash = ?`, f.Hash).Scan(&grpChecker)
-	if grpChecker == 1 {
-		f.Checker = true
-		if f.Banned {
-			f.Banned = false
-			_, _ = a.db.Exec(`UPDATE flows SET banned = 0 WHERE id = ?`, f.ID)
-		}
-	}
 	f.Marks = a.matchingMarks(*f)
 }
 
