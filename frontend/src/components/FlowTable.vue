@@ -313,7 +313,6 @@ function toggleCollapseDuplicates() {
 
 function rowClass(flow: Flow) {
   return {
-    stable: flow.stability_pct >= 70,
     banned: flow.banned,
     checker: flow.checker,
     selected: false,
