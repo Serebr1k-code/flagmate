@@ -675,6 +675,15 @@ func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream
 			bodyStr = flagRe.ReplaceAllString(bodyStr, fake)
 			respMeta["body"] = bodyStr
 			resp.Header.Set("X-FlagMate-Poisoned", "flag")
+			matched := flagRe.FindString(string(respBody))
+			if matched != "" {
+				now := time.Now().UTC().Format(time.RFC3339)
+				var svcPtr *int
+				if svcID > 0 {
+					svcPtr = &svcID
+				}
+				_, _ = a.db.Exec(`INSERT OR IGNORE INTO patterns(service_id,pattern,description,mode,active,created_at) VALUES(?,?,?,?,?,?)`, svcPtr, regexp.QuoteMeta(matched), "auto-ban: flag detected", "B", 1, now)
+			}
 		}
 		bodyToSend = []byte(bodyStr)
 	}
