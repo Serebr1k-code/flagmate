@@ -1461,8 +1461,8 @@ func (a *App) hydratePayloadMap(src map[string]any) map[string]any {
 }
 
 func flowHash(req, resp map[string]any, serviceID int) string {
-	base := fmt.Sprintf("%d|%s|%s|%s|%v", serviceID, asString(req["method"]), asString(req["uri"]), requestShape(req), resp["status"])
-	h := sha256.Sum256([]byte(base))
+	full := fmt.Sprintf("%d|%s|%s|q=%s|b=%s|%v", serviceID, asString(req["method"]), asString(req["uri"]), asString(req["query"]), asString(req["body"]), resp["status"])
+	h := sha256.Sum256([]byte(full))
 	return hex.EncodeToString(h[:])
 }
 
