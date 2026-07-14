@@ -1070,17 +1070,18 @@ func fakeNoise(seed string, i int) string {
 }
 
 func genFakeFlag(original string) string {
+	// Stable for 1 minute (time rounded to minute)
+	minuteKey := time.Now().Unix() / 60
+	hash := sha256.Sum256([]byte(fmt.Sprintf("fakeflag-%d", minuteKey)))
+	hex := hex.EncodeToString(hash[:])
 	if strings.HasPrefix(original, "flag{") {
-		rand := strconv.FormatInt(time.Now().UnixNano(), 36)
-		return "flag{" + rand[:min(16, len(rand))] + "}"
+		return "flag{" + hex[:16] + "}"
 	}
 	length := len(original)
-	out := make([]byte, length)
-	for i := 0; i < length; i++ {
-		out[i] = "abcdefghijklmnopqrstuvwxyz0123456789"[time.Now().UnixNano()%36]
-		time.Sleep(1)
+	if length > 48 {
+		length = 48
 	}
-	return string(out)
+	return hex[:length]
 }
 
 func copyHeaders(dst, src http.Header) {
