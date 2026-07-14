@@ -379,6 +379,7 @@ func initSchema(db *sql.DB) error {
 	_, _ = db.Exec(`ALTER TABLE flows ADD COLUMN req_hash TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE flows ADD COLUMN resp_hash TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_patterns_service ON patterns(service_id)`)
+	_, _ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_patterns_unique ON patterns(COALESCE(service_id,0), pattern)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_mirror_groups_service ON mirror_groups(service_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_flows_service_created ON flows(service_id, created_at DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_flows_hash_created ON flows(hash, created_at DESC)`)
