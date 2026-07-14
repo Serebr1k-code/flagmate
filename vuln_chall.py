@@ -88,8 +88,13 @@ def http_get(path):
 
 def checker_loop():
     global current_flag
-    # Register checker user once
-    http_get("/api/register?username={}&password=checker_pass".format(checker_user))
+    # Register checker user, retry until successful
+    while True:
+        resp = http_get("/api/register?username={}&password=checker_pass".format(checker_user))
+        if resp and "registered" in resp:
+            print("[checker:{}] registered as {}".format(PORT, checker_user), flush=True)
+            break
+        time.sleep(2)
     while True:
         try:
             flag = make_flag()
