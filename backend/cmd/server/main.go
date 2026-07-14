@@ -3402,8 +3402,7 @@ func (a *App) runMirrorTick() {
 	if !cfg.Enabled || len(cfg.Targets) == 0 {
 		return
 	}
-	since := time.Now().Add(-12 * time.Second)
-	rows, err := a.db.Query(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at FROM flows WHERE banned = 1 AND created_at >= ? ORDER BY created_at DESC LIMIT 200`, since.UTC().Format(time.RFC3339))
+	rows, err := a.db.Query(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at FROM flows WHERE banned = 1 ORDER BY created_at DESC LIMIT 50`)
 	if err != nil {
 		log.Printf("mirror banned query: %v", err)
 		return
