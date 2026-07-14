@@ -656,28 +656,16 @@ func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream
 		"body":    string(respBody),
 	}
 	_, svcID := a.lookupService(gatePort, gatePort)
+	hash := flowHash(reqMeta, respMeta, svcID)
 	banned := a.isBanned(reqMeta, respMeta, resp.StatusCode, svcID)
 	bm := a.banMode()
+	groupIsChecker := false
+	_ = a.db.QueryRow(`SELECT checker FROM flow_group_meta WHERE hash = ?`, hash).Scan(&groupIsChecker)
 
 	statusToSend := resp.StatusCode
 	bodyToSend := respBody
 
-	if bm == 0 && banned {
-		poisonedBody, contentType, limited := a.buildPoisonResponse(r)
-		statusToSend = http.StatusOK
-		if limited {
-			statusToSend = http.StatusTooManyRequests
-		}
-		bodyToSend = poisonedBody
-		resp.Header = http.Header{}
-		resp.Header.Set("Content-Type", contentType)
-		resp.Header.Set("X-FlagMate-Poisoned", "1")
-		if limited {
-			resp.Header.Set("Retry-After", "60")
-		}
-	}
-
-	if bm == 1 && !isCheckerFlow(reqMeta, respMeta) {
+	if bm == 1 && !groupIsChecker {
 		bodyStr := string(respBody)
 		flagRe, _ := regexp.Compile(`(?i)(?:flag\{[^\s{}]{25}\}|\b[A-Za-z0-9_+\-=]{31}\b)`)
 		log.Printf("AUTOFLAG bm=%d checker=%v matched=%v body=%.80s", bm, isCheckerFlow(reqMeta, respMeta), flagRe.MatchString(bodyStr), bodyStr)
@@ -691,7 +679,7 @@ func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream
 		bodyToSend = []byte(bodyStr)
 	}
 
-	if bm == 2 && !isCheckerFlow(reqMeta, respMeta) {
+	if bm == 2 && !groupIsChecker {
 		a.storeInlineFlow(r, reqMeta, respMeta, banned, gatePort)
 		hj, ok := w.(http.Hijacker)
 		if ok {
@@ -1557,9 +1545,12 @@ func (a *App) enrichFlow(f *Flow) {
 	_ = a.db.QueryRow(`SELECT COUNT(*) FROM flows WHERE hash = ? AND checker = ? AND banned = ?`, f.Hash, boolInt(f.Checker), boolInt(f.Banned)).Scan(&f.GroupCount)
 	var grpChecker int
 	_ = a.db.QueryRow(`SELECT checker FROM flow_group_meta WHERE hash = ?`, f.Hash).Scan(&grpChecker)
-	if grpChecker == 1 && f.Banned {
-		f.Banned = false
-		_, _ = a.db.Exec(`UPDATE flows SET banned = 0 WHERE id = ?`, f.ID)
+	if grpChecker == 1 {
+		f.Checker = true
+		if f.Banned {
+			f.Banned = false
+			_, _ = a.db.Exec(`UPDATE flows SET banned = 0 WHERE id = ?`, f.ID)
+		}
 	}
 	f.Marks = a.matchingMarks(*f)
 }
