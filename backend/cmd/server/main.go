@@ -2525,7 +2525,8 @@ func (a *App) matchingPatterns(flow Flow) []Pattern {
 }
 
 func (a *App) scheduleBanRecalculation() {
-	go a.recalculateAllFlowBans()
+	// New flows are evaluated at gate time. Old flows keep their state.
+	// No need to recalculate all flows on every pattern change.
 }
 
 func (a *App) recalculateAllFlowBans() {
