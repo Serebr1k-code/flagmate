@@ -3334,7 +3334,11 @@ func (a *App) forwardMirror(raw string) {
 	}
 	for _, t := range cfg.Targets {
 		go func(target MirrorTarget) {
-			addr := net.JoinHostPort(target.IP, strconv.Itoa(target.Port))
+			targetIP := target.IP
+			if targetIP == "127.0.0.1" || targetIP == "localhost" {
+				targetIP = "172.28.0.1"
+			}
+			addr := net.JoinHostPort(targetIP, strconv.Itoa(target.Port))
 			conn, err := net.DialTimeout("tcp", addr, 300*time.Millisecond)
 			if err != nil {
 				return
@@ -3469,7 +3473,11 @@ func (a *App) mirrorMarkedServiceGroups(cfg ServiceMirrorConfig, targets []Mirro
 }
 
 func (a *App) sendMirrorPayloadRaw(target MirrorTarget, payload string, serviceIDPtr *int, hash string, flowID string) {
-	addr := net.JoinHostPort(target.IP, strconv.Itoa(target.Port))
+	targetIP := target.IP
+	if targetIP == "127.0.0.1" || targetIP == "localhost" {
+		targetIP = "172.28.0.1"
+	}
+	addr := net.JoinHostPort(targetIP, strconv.Itoa(target.Port))
 	serviceID := 0
 	if serviceIDPtr != nil {
 		serviceID = *serviceIDPtr
