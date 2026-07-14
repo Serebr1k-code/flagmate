@@ -201,7 +201,7 @@ const emit = defineEmits<{
   'open-word-picker': [flow: Flow]
 }>()
 
-defineProps<{ selectedFlow?: Flow | null }>()
+const props = defineProps<{ selectedFlow?: Flow | null }>()
 
 const flows = ref<Flow[]>([])
 const page = ref(1)
@@ -315,7 +315,7 @@ function rowClass(flow: Flow) {
   return {
     banned: flow.banned,
     checker: flow.checker,
-    selected: false,
+    selected: props.selectedFlow?.id === flow.id,
     'negative-response': !flow.banned && !flow.checker && !isPositiveResponse(flow.response_code),
   }
 }
