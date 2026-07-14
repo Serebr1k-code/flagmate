@@ -88,7 +88,8 @@
               </div>
             </div>
           </div>
-          <div v-if="groupsForService(service.id).length === 0" class="empty-state">No mirrored groups — banned flows will appear here when targets are configured</div>
+          <div v-if="groupsForService(service.id).length === 0 && config.targets.length === 0" class="empty-state">Add a team IP to start mirroring</div>
+          <div v-else-if="groupsForService(service.id).length === 0" class="empty-state">No banned flows yet — attack traffic that gets banned will appear here</div>
         </div>
       </div>
     </div>
@@ -196,13 +197,20 @@ async function fetchConfig() {
     services.value = serviceData
     mirroredGroups.value = groupData
     stats.value = statData
+    // Merge mirrored groups with banned groups
+    const bannedGroups = (bannedData || []).filter((g: any) => g.count > 0)
+    const merged = [...mirroredGroups.value]
+    for (const bg of bannedGroups) {
+      if (!merged.find(m => m.hash === bg.hash)) {
+        merged.push(bg)
+      }
+    }
+    mirroredGroups.value = merged
     // Count banned groups per service
     const counts: Record<number, number> = {}
-    for (const g of bannedData || []) {
-      if (g.banned || g.service_id) {
-        const sid = g.service_id || 0
-        counts[sid] = (counts[sid] || 0) + g.count
-      }
+    for (const g of bannedGroups) {
+      const sid = g.service_id || 0
+      counts[sid] = (counts[sid] || 0) + g.count
     }
     bannedCounts.value = counts
     for (const service of services.value) serviceConfig(service.id)
