@@ -1554,7 +1554,7 @@ func (a *App) enrichFlow(f *Flow) {
 	f.Stable = pct >= 70
 	f.Mirrored = a.isMirroredGroup(f.Hash)
 	f.GroupName = a.groupName(f.Hash)
-	_ = a.db.QueryRow(`SELECT COUNT(*) FROM flows WHERE hash = ?`, f.Hash).Scan(&f.GroupCount)
+	_ = a.db.QueryRow(`SELECT COUNT(*) FROM flows WHERE hash = ? AND checker = ? AND banned = ?`, f.Hash, boolInt(f.Checker), boolInt(f.Banned)).Scan(&f.GroupCount)
 	f.Marks = a.matchingMarks(*f)
 }
 
