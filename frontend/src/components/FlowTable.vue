@@ -330,7 +330,7 @@ async function toggleExpanded(flow: Flow) {
   expandedHashes.value = new Set(expandedHashes.value)
   if (!expandedFlows.value[flow.hash]) {
     try {
-      const { data } = await api.get('/flows/history', { params: { hash: flow.hash, limit: 100, offset: 1 } })
+      const { data } = await api.get('/flows/history', { params: { hash: flow.hash, limit: 100, offset: 1, checker: flow.checker ? '1' : '0', banned: flow.banned ? '1' : '0' } })
       expandedFlows.value = { ...expandedFlows.value, [flow.hash]: data || [] }
     } catch (e) {
       console.error('Failed to fetch repeated streams:', e)

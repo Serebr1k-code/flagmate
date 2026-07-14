@@ -2268,7 +2268,19 @@ func (a *App) flowHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	limit := min(100, max(1, parseInt(r.URL.Query().Get("limit"), 100)))
 	offset := max(0, parseInt(r.URL.Query().Get("offset"), 0))
-	rows, err := a.db.Query(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows WHERE hash = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`, hash, limit, offset)
+	where := `hash = ?`
+	args := []any{hash}
+	if cb := r.URL.Query().Get("checker"); cb != "" {
+		where += ` AND checker = ?`
+		args = append(args, boolQueryInt(cb))
+	}
+	if bb := r.URL.Query().Get("banned"); bb != "" {
+		where += ` AND banned = ?`
+		args = append(args, boolQueryInt(bb))
+	}
+	query := `SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows WHERE ` + where + ` ORDER BY created_at DESC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+	rows, err := a.db.Query(query, args...)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
