@@ -340,7 +340,7 @@ async function toggleExpanded(flow: Flow) {
 }
 
 function expandKey(flow: Flow) {
-  return `${flow.hash}_c${flow.checker ? 1 : 0}_b${flow.banned ? 1 : 0}`
+  return `${flow.hash}_c${flow.checker ? 1 : 0}_b${flow.banned ? 1 : 0}_${flow.id}`
 }
 
 async function fetchServices() {
