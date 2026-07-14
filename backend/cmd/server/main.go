@@ -1507,8 +1507,8 @@ func (a *App) insertFlow(f Flow) error {
 	respRaw, _ := json.Marshal(f.RawResponse)
 	reqHash, reqStore := a.payloadRef(reqRaw)
 	respHash, respStore := a.payloadRef(respRaw)
-	_, err := a.db.Exec(`INSERT INTO flows (id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at,req_hash,resp_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		f.ID, intPtrToAny(f.ServiceID), f.Direction, f.StartTS, f.EndTS, reqStore, respStore, f.Hash, boolInt(f.Stable), boolInt(f.Checker), boolInt(f.Banned), f.ResponseCode, f.FlowID, f.SrcIP, f.DstIP, f.SrcPort, f.DstPort, f.Proto, f.PktCount, f.BytesIn, f.BytesOut, f.CreatedAt, f.UpdatedAt, reqHash, respHash)
+	_, err := a.db.Exec(`INSERT INTO flows (id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,req_hash,resp_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		f.ID, intPtrToAny(f.ServiceID), f.Direction, f.StartTS, f.EndTS, reqStore, respStore, f.Hash, boolInt(f.Stable), boolInt(f.Checker), boolInt(f.Banned), f.ResponseCode, f.FlowID, f.SrcIP, f.DstIP, f.SrcPort, f.DstPort, f.Proto, f.PktCount, f.BytesIn, f.BytesOut, f.CreatedAt, reqHash, respHash)
 	return err
 }
 
@@ -3609,7 +3609,7 @@ func scanFlow(rows *sql.Rows) (Flow, error) {
 	var reqRaw, respRaw string
 	var stable, checker, banned int
 	var sid sql.NullInt64
-	if err := rows.Scan(&f.ID, &sid, &f.Direction, &f.StartTS, &f.EndTS, &reqRaw, &respRaw, &f.Hash, &stable, &checker, &banned, &f.ResponseCode, &f.FlowID, &f.SrcIP, &f.DstIP, &f.SrcPort, &f.DstPort, &f.Proto, &f.PktCount, &f.BytesIn, &f.BytesOut, &f.CreatedAt); err != nil {
+	if err := rows.Scan(&f.ID, &sid, &f.Direction, &f.StartTS, &f.EndTS, &reqRaw, &respRaw, &f.Hash, &stable, &checker, &banned, &f.ResponseCode, &f.FlowID, &f.SrcIP, &f.DstIP, &f.SrcPort, &f.DstPort, &f.Proto, &f.PktCount, &f.BytesIn, &f.BytesOut, &f.CreatedAt, &f.UpdatedAt); err != nil {
 		return f, err
 	}
 	if sid.Valid {
@@ -3628,7 +3628,7 @@ func scanFlowRow(row *sql.Row) (Flow, error) {
 	var reqRaw, respRaw string
 	var stable, checker, banned int
 	var sid sql.NullInt64
-	if err := row.Scan(&f.ID, &sid, &f.Direction, &f.StartTS, &f.EndTS, &reqRaw, &respRaw, &f.Hash, &stable, &checker, &banned, &f.ResponseCode, &f.FlowID, &f.SrcIP, &f.DstIP, &f.SrcPort, &f.DstPort, &f.Proto, &f.PktCount, &f.BytesIn, &f.BytesOut, &f.CreatedAt); err != nil {
+	if err := row.Scan(&f.ID, &sid, &f.Direction, &f.StartTS, &f.EndTS, &reqRaw, &respRaw, &f.Hash, &stable, &checker, &banned, &f.ResponseCode, &f.FlowID, &f.SrcIP, &f.DstIP, &f.SrcPort, &f.DstPort, &f.Proto, &f.PktCount, &f.BytesIn, &f.BytesOut, &f.CreatedAt, &f.UpdatedAt); err != nil {
 		return f, err
 	}
 	if sid.Valid {
