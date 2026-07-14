@@ -206,13 +206,10 @@ async function fetchConfig() {
       }
     }
     mirroredGroups.value = merged
-    // Count banned groups per service
-    const counts: Record<number, number> = {}
-    for (const g of bannedGroups) {
-      const sid = g.service_id || 0
-      counts[sid] = (counts[sid] || 0) + g.count
-    }
-    bannedCounts.value = counts
+    // Count banned groups per service - query directly
+    api.get('/flows/banned-counts').then(({ data }) => {
+      bannedCounts.value = data || {}
+    }).catch(() => {})
     for (const service of services.value) serviceConfig(service.id)
     for (const group of mirroredGroups.value) draftNames.value[group.hash] = group.name || ''
   } catch (e) { console.error('Failed to fetch mirroring config:', e) }

@@ -281,6 +281,7 @@ func main() {
 		pr.Post("/flows/{id}/unban", app.unbanFlow)
 		pr.Get("/flows/{id}/matching-patterns", app.matchingPatternsForFlow)
 		pr.Post("/flows/{id}/remove-matching-patterns", app.removeMatchingPatternsForFlow)
+		pr.Get("/flows/banned-counts", app.bannedCounts)
 
 		pr.Get("/flow-groups", app.flowGroups)
 		pr.Post("/flow-groups/{hash}/name", app.renameFlowGroup)
@@ -2270,6 +2271,23 @@ func (a *App) loadDefaultMarks(w http.ResponseWriter, _ *http.Request) {
 		_, _ = a.db.Exec(`INSERT INTO marks(name,regex,color,sort_order) VALUES (?,?,?,?) ON CONFLICT(regex) DO UPDATE SET name=excluded.name,color=excluded.color`, mark.Name, mark.Regex, mark.Color, (idx+1)*100)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "count": len(defaults)})
+}
+
+func (a *App) bannedCounts(w http.ResponseWriter, _ *http.Request) {
+	rows, err := a.db.Query(`SELECT service_id, COUNT(*) FROM flows WHERE banned = 1 AND service_id IS NOT NULL AND service_id > 0 GROUP BY service_id`)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+	counts := map[int]int{}
+	for rows.Next() {
+		var sid, count int
+		if rows.Scan(&sid, &count) == nil {
+			counts[sid] = count
+		}
+	}
+	writeJSON(w, http.StatusOK, counts)
 }
 
 func (a *App) listFlows(w http.ResponseWriter, r *http.Request) {
