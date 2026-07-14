@@ -30,6 +30,7 @@
               @change="renameGroup(group)"
             />
             <span class="badge badge-primary">{{ group.count }}x</span>
+            <span v-if="group.stability_pct > 0" class="badge" :class="group.stability_pct >= 70 ? 'badge-success' : 'badge-warning'">{{ group.stability_pct }}%</span>
             <span v-if="group.checker" class="badge badge-success">Checker</span>
             <span v-if="group.mirrored" class="badge badge-outline">Mirrored</span>
           </div>
