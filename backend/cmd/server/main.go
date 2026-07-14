@@ -677,10 +677,10 @@ func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream
 
 	if bm == 1 && !isCheckerFlow(reqMeta, respMeta) {
 		bodyStr := string(respBody)
-		flagRe, _ := regexp.Compile(`(?i)(?:flag\{[^\s{}]{4,128}\}|\b[A-Za-z0-9_+\-=]{24}\b|\b[A-Za-z0-9_+\-=]{32}\b|\b[A-Za-z0-9_+\-=]{48}\b)`)
+		flagRe, _ := regexp.Compile(`(?i)(?:flag\{[^\s{}]{25}\}|\b[A-Za-z0-9_+\-=]{31}\b)`)
 		if flagRe.MatchString(bodyStr) {
 			banned = true
-			fake := genFakeFlag(flagRe.FindString(bodyStr))
+			fake := genFakeFlag()
 			bodyStr = flagRe.ReplaceAllString(bodyStr, fake)
 			respMeta["body"] = bodyStr
 			resp.Header.Set("X-FlagMate-Poisoned", "flag")
@@ -1070,14 +1070,10 @@ func fakeNoise(seed string, i int) string {
 	return strings.Join(parts, "|")
 }
 
-func genFakeFlag(original string) string {
+func genFakeFlag() string {
 	minuteKey := time.Now().Unix() / 60
 	hash := sha256.Sum256([]byte(fmt.Sprintf("fakeflag-%d", minuteKey)))
-	hex := hex.EncodeToString(hash[:])
-	if strings.HasPrefix(original, "flag{") {
-		return "flag{" + hex[:25] + "}"
-	}
-	return hex[:31]
+	return hex.EncodeToString(hash[:])[:31]
 }
 
 func copyHeaders(dst, src http.Header) {
@@ -2969,7 +2965,7 @@ func topEndpoint(items map[string]int) string {
 }
 
 func extractFlags(src string) []string {
-	re := regexp.MustCompile(`(?i)(flag\{[^\s{}]{4,128}\}|\b[A-Za-z0-9_+\-=]{24}\b|\b[A-Za-z0-9_+\-=]{32}\b|\b[A-Za-z0-9_+\-=]{48}\b)`)
+	re := regexp.MustCompile(`(?i)(?:flag\{[^\s{}]{25}\}|\b[A-Za-z0-9_+\-=]{31}\b)`)
 	matches := re.FindAllString(src, -1)
 	out := []string{}
 	seen := map[string]bool{}
@@ -2984,7 +2980,7 @@ func extractFlags(src string) []string {
 }
 
 func defaultFlagRegex() string {
-	return `(?i)(?:flag\{[^\s{}]{4,128}\}|\b[A-Za-z0-9_+\-=]{24}\b|\b[A-Za-z0-9_+\-=]{32}\b|\b[A-Za-z0-9_+\-=]{48}\b)`
+	return `(?i)(?:\b[A-Za-z0-9_+\-=]{31}\b)`
 }
 
 func (a *App) responseMatchesFlagMark(resp map[string]any) bool {
