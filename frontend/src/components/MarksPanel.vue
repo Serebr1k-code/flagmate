@@ -22,6 +22,7 @@
         class="mark-card"
         :class="{ disabled: !mark.active, dragging: draggingId === mark.id, 'insert-before': insertIndex === index && draggingId !== mark.id, 'insert-after': insertIndex === index + 1 && draggingId !== mark.id }"
         draggable="true"
+        @click="editMark(mark)"
         @dragstart="onDragStart($event, mark.id)"
         @dragover.prevent="onDragOver($event, index)"
         @drop.prevent="onDrop"
@@ -44,6 +45,21 @@
       </div>
       <div v-if="marks.length === 0" class="empty-state">No marks yet</div>
     </div>
+
+    <Teleport to="body">
+      <div v-if="editingMark" class="mark-overlay" @click.self="editingMark = null">
+        <div class="mark-modal">
+          <h3>Edit mark</h3>
+          <input v-model="editDraft.name" class="input" placeholder="Name" />
+          <input v-model="editDraft.regex" class="input regex-input" placeholder="Regex" />
+          <input v-model="editDraft.color" class="input color-input" type="color" />
+          <div class="modal-actions">
+            <button class="btn btn-outline" @click="editingMark = null">Cancel</button>
+            <button class="btn btn-primary" @click="saveEdit">Save</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -54,6 +70,8 @@ import type { Mark } from '@/types'
 
 const marks = ref<Mark[]>([])
 const draft = ref({ name: '', regex: '', color: '#ef4444' })
+const editingMark = ref<Mark | null>(null)
+const editDraft = ref({ name: '', regex: '', color: '#ef4444' })
 const draggingId = ref<number | null>(null)
 const insertIndex = ref<number | null>(null)
 const reordering = ref(false)
@@ -69,6 +87,18 @@ async function createMark() {
   if (!draft.value.regex.trim()) return
   await api.post('/marks', draft.value)
   draft.value = { name: '', regex: '', color: '#ef4444' }
+  await fetchMarks()
+}
+
+function editMark(mark: Mark) {
+  editingMark.value = mark
+  editDraft.value = { name: mark.name || '', regex: mark.regex, color: mark.color }
+}
+
+async function saveEdit() {
+  if (!editingMark.value) return
+  await api.put(`/marks/${editingMark.value.id}`, editDraft.value)
+  editingMark.value = null
   await fetchMarks()
 }
 
@@ -167,6 +197,10 @@ onUnmounted(stopRefresh)
 .mark-card:hover { border-color: color-mix(in srgb, var(--primary) 55%, var(--border)); }
 .mark-card.dragging { opacity: 0.42; transform: scale(0.985); box-shadow: 0 10px 30px rgba(0,0,0,0.28); cursor: grabbing; }
 .mark-card.insert-before::before, .mark-card.insert-after::after { content: ''; position: absolute; left: 10px; right: 10px; height: 3px; border-radius: 999px; background: #22c55e; box-shadow: 0 0 12px rgba(34,197,94,.7); }
+.mark-overlay { position: fixed; inset: 0; z-index: 9999; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.5); }
+.mark-modal { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; min-width: 380px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 20px 40px rgba(0,0,0,.3); }
+.mark-modal h3 { margin: 0; }
+.mark-modal .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
 .mark-card.insert-before::before { top: -7px; }
 .mark-card.insert-after::after { bottom: -7px; }
 .mark-card.disabled { opacity: 0.55; }

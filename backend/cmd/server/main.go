@@ -265,6 +265,7 @@ func main() {
 		pr.Post("/marks/{id}/ban", app.banMark)
 		pr.Post("/marks/{id}/unban", app.unbanMark)
 		pr.Post("/marks/{id}/toggle", app.toggleMark)
+		pr.Put("/marks/{id}", app.updateMark)
 		pr.Delete("/marks/{id}", app.deleteMark)
 
 		pr.Get("/flows", app.listFlows)
@@ -1070,18 +1071,13 @@ func fakeNoise(seed string, i int) string {
 }
 
 func genFakeFlag(original string) string {
-	// Stable for 1 minute (time rounded to minute)
 	minuteKey := time.Now().Unix() / 60
 	hash := sha256.Sum256([]byte(fmt.Sprintf("fakeflag-%d", minuteKey)))
 	hex := hex.EncodeToString(hash[:])
 	if strings.HasPrefix(original, "flag{") {
-		return "flag{" + hex[:16] + "}"
+		return "flag{" + hex[:25] + "}"
 	}
-	length := len(original)
-	if length > 48 {
-		length = 48
-	}
-	return hex[:length]
+	return hex[:31]
 }
 
 func copyHeaders(dst, src http.Header) {
@@ -2049,6 +2045,25 @@ func (a *App) nextMarkOrder() int {
 		return 100
 	}
 	return int(maxOrder.Int64) + 100
+}
+
+func (a *App) updateMark(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var in struct {
+		Name  string `json:"name"`
+		Regex string `json:"regex"`
+		Color string `json:"color"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+	_, err := a.db.Exec(`UPDATE marks SET name = ?, regex = ?, color = ? WHERE id = ?`, in.Name, in.Regex, in.Color, id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (a *App) deleteMark(w http.ResponseWriter, r *http.Request) {
