@@ -123,6 +123,7 @@ type Flow struct {
 	BytesIn      int            `json:"bytes_in"`
 	BytesOut     int            `json:"bytes_out"`
 	CreatedAt    string         `json:"created_at"`
+	UpdatedAt    string         `json:"updated_at"`
 }
 
 type WS struct {
@@ -231,6 +232,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go app.startSuricataListener(ctx)
+	go app.startBanUpdater(ctx)
 	go app.startMirrorScheduler(ctx)
 	if cfg.GateEnabled {
 		go app.startHTTPGate(ctx)
@@ -398,7 +400,7 @@ func (a *App) migrateFlowHashes() {
 		return
 	}
 	log.Printf("migrating flow hashes to strict shape version")
-	rows, err := a.db.Query(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows`)
+	rows, err := a.db.Query(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at FROM flows`)
 	if err != nil {
 		log.Printf("flow hash migration query error: %v", err)
 		return
@@ -669,7 +671,6 @@ func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream
 	if bm == 1 && !groupIsChecker {
 		bodyStr := string(respBody)
 		flagRe, _ := regexp.Compile(`(?i)(?:flag\{[^\s{}]{25}\}|\b[A-Za-z0-9_+\-=]{31}\b)`)
-		log.Printf("AUTOFLAG bm=%d checker=%v matched=%v body=%.80s", bm, isCheckerFlow(reqMeta, respMeta), flagRe.MatchString(bodyStr), bodyStr)
 		if flagRe.MatchString(bodyStr) {
 			banned = true
 			fake := genFakeFlag()
@@ -1501,7 +1502,7 @@ func (a *App) insertFlow(f Flow) error {
 	respRaw, _ := json.Marshal(f.RawResponse)
 	reqHash, reqStore := a.payloadRef(reqRaw)
 	respHash, respStore := a.payloadRef(respRaw)
-	_, err := a.db.Exec(`INSERT INTO flows (id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,req_hash,resp_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err := a.db.Exec(`INSERT INTO flows (id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at,req_hash,resp_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		f.ID, intPtrToAny(f.ServiceID), f.Direction, f.StartTS, f.EndTS, reqStore, respStore, f.Hash, boolInt(f.Stable), boolInt(f.Checker), boolInt(f.Banned), f.ResponseCode, f.FlowID, f.SrcIP, f.DstIP, f.SrcPort, f.DstPort, f.Proto, f.PktCount, f.BytesIn, f.BytesOut, f.CreatedAt, reqHash, respHash)
 	return err
 }
@@ -1620,7 +1621,16 @@ func (a *App) enrichFlow(f *Flow) {
 			f.Checker = true
 		} else {
 			f.Banned = false
-			_, _ = a.db.Exec(`UPDATE flows SET banned = 0 WHERE id = ?`, f.ID)
+			_, _ = a.db.Exec(`UPDATE flows SET banned = 0, updated_at = ? WHERE id = ?`, time.Now().UTC().Format(time.RFC3339), f.ID)
+		}
+	}
+	// Lazy ban evaluation: if flow hasn't been checked since last ban change
+	lbc := a.lastBanChange()
+	if lbc != "" && lbc != "0" && f.UpdatedAt < lbc && !f.Checker {
+		shouldBan := len(a.matchingPatterns(*f)) > 0
+		if shouldBan != f.Banned {
+			f.Banned = shouldBan
+			_, _ = a.db.Exec(`UPDATE flows SET banned = ?, updated_at = ? WHERE id = ?`, boolInt(shouldBan), time.Now().UTC().Format(time.RFC3339), f.ID)
 		}
 	}
 	f.Marks = a.matchingMarks(*f)
@@ -1846,7 +1856,7 @@ func (a *App) listPatterns(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) patternMatchCount(pattern Pattern) int {
-	query := `SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows`
+	query := `SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at FROM flows`
 	args := []any{}
 	if pattern.ServiceID != nil {
 		query += ` WHERE service_id = ?`
@@ -1936,7 +1946,7 @@ func (a *App) previewPatterns(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
 		return
 	}
-	rows, err := a.db.Query(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows ORDER BY created_at DESC LIMIT 10000`)
+	rows, err := a.db.Query(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at FROM flows ORDER BY created_at DESC LIMIT 10000`)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -2272,7 +2282,7 @@ func (a *App) listFlows(w http.ResponseWriter, r *http.Request) {
 	checkerFilter := strings.TrimSpace(r.URL.Query().Get("checker"))
 	collapse := boolQueryInt(r.URL.Query().Get("collapse")) == 1
 
-	query := `SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows`
+	query := `SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at FROM flows`
 	args := []any{}
 	where := []string{}
 	if serviceID >= 0 {
@@ -2325,7 +2335,7 @@ func (a *App) listFlows(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) getFlow(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	row := a.db.QueryRow(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows WHERE id = ?`, id)
+	row := a.db.QueryRow(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at FROM flows WHERE id = ?`, id)
 	f, err := scanFlowRow(row)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -2354,7 +2364,7 @@ func (a *App) flowHistory(w http.ResponseWriter, r *http.Request) {
 		where += ` AND banned = ?`
 		args = append(args, boolQueryInt(bb))
 	}
-	query := `SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows WHERE ` + where + ` ORDER BY created_at DESC LIMIT ? OFFSET ?`
+	query := `SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at FROM flows WHERE ` + where + ` ORDER BY created_at DESC LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
 	rows, err := a.db.Query(query, args...)
 	if err != nil {
@@ -2477,7 +2487,7 @@ func (a *App) removeMatchingPatternsForFlow(w http.ResponseWriter, r *http.Reque
 }
 
 func (a *App) flowByID(id string) (Flow, error) {
-	row := a.db.QueryRow(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows WHERE id = ?`, id)
+	row := a.db.QueryRow(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at FROM flows WHERE id = ?`, id)
 	f, err := scanFlowRow(row)
 	if err != nil {
 		return f, err
@@ -2525,8 +2535,7 @@ func (a *App) matchingPatterns(flow Flow) []Pattern {
 }
 
 func (a *App) scheduleBanRecalculation() {
-	// New flows are evaluated at gate time. Old flows keep their state.
-	// No need to recalculate all flows on every pattern change.
+	a.touchBanChange()
 }
 
 func (a *App) recalculateAllFlowBans() {
@@ -2534,7 +2543,7 @@ func (a *App) recalculateAllFlowBans() {
 		return
 	}
 	defer a.recalcMu.Unlock()
-	rows, err := a.db.Query(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows`)
+	rows, err := a.db.Query(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at FROM flows`)
 	if err != nil {
 		log.Printf("recalculate banned flows query error: %v", err)
 		return
@@ -2641,7 +2650,7 @@ func (a *App) flowGroups(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) flowGroupMeta(hash string, cnt int, first, last string, includeFlow bool) (FlowGroupMeta, bool) {
-	row := a.db.QueryRow(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows WHERE hash = ? ORDER BY created_at DESC LIMIT 1`, hash)
+	row := a.db.QueryRow(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at FROM flows WHERE hash = ? ORDER BY created_at DESC LIMIT 1`, hash)
 	flow, err := scanFlowRow(row)
 	if err != nil {
 		return FlowGroupMeta{}, false
@@ -3260,6 +3269,17 @@ func (a *App) resetHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "delete_bans_services": deleteBansServices})
 }
 
+func (a *App) lastBanChange() string {
+	var v string
+	_ = a.db.QueryRow(`SELECT value FROM settings WHERE key = 'last_ban_change'`).Scan(&v)
+	return v
+}
+
+func (a *App) touchBanChange() {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, _ = a.db.Exec(`INSERT INTO settings(key, value) VALUES ('last_ban_change', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, now)
+}
+
 func (a *App) banMode() int {
 	var mode string
 	if err := a.db.QueryRow(`SELECT value FROM settings WHERE key = 'ban_mode'`).Scan(&mode); err != nil {
@@ -3304,6 +3324,42 @@ func (a *App) forwardMirror(raw string) {
 	}
 }
 
+func (a *App) startBanUpdater(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.recheckStaleFlows()
+		}
+	}
+}
+
+func (a *App) recheckStaleFlows() {
+	lbc := a.lastBanChange()
+	if lbc == "" || lbc == "0" {
+		return
+	}
+	rows, err := a.db.Query(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at,updated_at FROM flows WHERE updated_at < ? AND checker = 0 ORDER BY updated_at ASC LIMIT 50`, lbc)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		f, err := scanFlow(rows)
+		if err != nil {
+			continue
+		}
+		a.hydrateFlowPayloads(&f)
+		shouldBan := len(a.matchingPatterns(f)) > 0
+		if shouldBan != f.Banned {
+			f.Banned = shouldBan
+			_, _ = a.db.Exec(`UPDATE flows SET banned = ?, updated_at = ? WHERE id = ?`, boolInt(shouldBan), time.Now().UTC().Format(time.RFC3339), f.ID)
+		}
+	}
+}
 func (a *App) startMirrorScheduler(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -3325,7 +3381,7 @@ func (a *App) runMirrorTick() {
 		return
 	}
 	since := time.Now().Add(-12 * time.Second)
-	rows, err := a.db.Query(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows WHERE banned = 1 AND created_at >= ? ORDER BY created_at DESC LIMIT 200`, since.UTC().Format(time.RFC3339))
+	rows, err := a.db.Query(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at FROM flows WHERE banned = 1 AND created_at >= ? ORDER BY created_at DESC LIMIT 200`, since.UTC().Format(time.RFC3339))
 	if err != nil {
 		log.Printf("mirror banned query: %v", err)
 		return
@@ -3368,7 +3424,7 @@ func (a *App) mirrorMarkedServiceGroups(cfg ServiceMirrorConfig, targets []Mirro
 		return
 	}
 	for _, hash := range hashes {
-		row := a.db.QueryRow(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at FROM flows WHERE hash = ? ORDER BY created_at DESC LIMIT 1`, hash)
+		row := a.db.QueryRow(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at FROM flows WHERE hash = ? ORDER BY created_at DESC LIMIT 1`, hash)
 		flow, err := scanFlowRow(row)
 		if err != nil {
 			continue
