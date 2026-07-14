@@ -896,8 +896,11 @@ func (a *App) storeInlineFlow(r *http.Request, reqMeta, respMeta map[string]any,
 		BytesIn:      len(jsonString(reqMeta)),
 		BytesOut:     len(jsonString(respMeta)),
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
+		UpdatedAt:    time.Now().UTC().Format(time.RFC3339),
 	}
-	if err := a.insertFlow(flow); err == nil {
+	if err := a.insertFlow(flow); err != nil {
+		log.Printf("storeInlineFlow insert error: %v", err)
+	} else {
 		a.enrichFlow(&flow)
 		a.broadcastFlow(flow)
 	}
@@ -1257,6 +1260,7 @@ func (a *App) handleEVE(raw string) error {
 		BytesIn:      asInt(ev["bytes_toserver"]),
 		BytesOut:     asInt(ev["bytes_toclient"]),
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
+		UpdatedAt:    time.Now().UTC().Format(time.RFC3339),
 	}
 
 	if err := a.insertFlow(flow); err != nil {
@@ -1504,7 +1508,7 @@ func (a *App) insertFlow(f Flow) error {
 	reqHash, reqStore := a.payloadRef(reqRaw)
 	respHash, respStore := a.payloadRef(respRaw)
 	_, err := a.db.Exec(`INSERT INTO flows (id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at,req_hash,resp_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		f.ID, intPtrToAny(f.ServiceID), f.Direction, f.StartTS, f.EndTS, reqStore, respStore, f.Hash, boolInt(f.Stable), boolInt(f.Checker), boolInt(f.Banned), f.ResponseCode, f.FlowID, f.SrcIP, f.DstIP, f.SrcPort, f.DstPort, f.Proto, f.PktCount, f.BytesIn, f.BytesOut, f.CreatedAt, reqHash, respHash)
+		f.ID, intPtrToAny(f.ServiceID), f.Direction, f.StartTS, f.EndTS, reqStore, respStore, f.Hash, boolInt(f.Stable), boolInt(f.Checker), boolInt(f.Banned), f.ResponseCode, f.FlowID, f.SrcIP, f.DstIP, f.SrcPort, f.DstPort, f.Proto, f.PktCount, f.BytesIn, f.BytesOut, f.CreatedAt, f.UpdatedAt, reqHash, respHash)
 	return err
 }
 
