@@ -682,7 +682,15 @@ func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream
 				if svcID > 0 {
 					svcPtr = &svcID
 				}
-				_, _ = a.db.Exec(`INSERT OR IGNORE INTO patterns(service_id,pattern,description,mode,active,created_at) VALUES(?,?,?,?,?,?)`, svcPtr, regexp.QuoteMeta(matched), "auto-ban: flag detected", "B", 1, now)
+				// Ban the request URI path + suspicious words from the request
+				uriPath := asString(reqMeta["uri"])
+				if uriPath != "" {
+					_, _ = a.db.Exec(`INSERT OR IGNORE INTO patterns(service_id,pattern,description,mode,active,created_at) VALUES(?,?,?,?,?,?)`, svcPtr, regexp.QuoteMeta(uriPath), "auto-ban: flagged endpoint", "B", 1, now)
+				}
+				// Also ban suspicious query/body tokens
+				for _, token := range extractSuspiciousTokens(reqMeta) {
+					_, _ = a.db.Exec(`INSERT OR IGNORE INTO patterns(service_id,pattern,description,mode,active,created_at) VALUES(?,?,?,?,?,?)`, svcPtr, regexp.QuoteMeta(token), "auto-ban: suspicious token", "B", 1, now)
+				}
 			}
 		}
 		bodyToSend = []byte(bodyStr)
@@ -1068,6 +1076,58 @@ func fakeNoise(seed string, i int) string {
 		parts = append(parts, p)
 	}
 	return strings.Join(parts, "|")
+}
+
+func extractSuspiciousTokens(req map[string]any) []string {
+	tokens := []string{}
+	seen := map[string]bool{}
+	add := func(t string) {
+		t = strings.TrimSpace(t)
+		if t == "" || len(t) < 3 || seen[t] {
+			return
+		}
+		seen[t] = true
+		tokens = append(tokens, t)
+	}
+	// Query values
+	for _, val := range splitPairs(asString(req["query"])) {
+		add(val)
+	}
+	// Body values if URL-encoded
+	body := asString(req["body"])
+	if body != "" {
+		for _, val := range splitPairs(body) {
+			add(val)
+		}
+	}
+	// URI path parts
+	uri := asString(req["uri"])
+	for _, part := range strings.Split(uri, "/") {
+		part = strings.TrimSpace(part)
+		if part != "" && !strings.HasPrefix(part, "api") && !strings.HasPrefix(part, "?") {
+			add(part)
+		}
+	}
+	return tokens
+}
+
+func splitPairs(raw string) []string {
+	out := []string{}
+	for _, pair := range strings.Split(raw, "&") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		parts := strings.SplitN(pair, "=", 2)
+		if len(parts) == 2 && parts[1] != "" {
+			val := parts[1]
+			if len(val) > 64 {
+				val = val[:64]
+			}
+			out = append(out, val)
+		}
+	}
+	return out
 }
 
 func genFakeFlag() string {
