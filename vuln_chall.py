@@ -3,7 +3,7 @@ import json, os, threading, time, sqlite3, random, string, urllib.request, urlli
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
-FLAG_PREFIX = os.environ.get("FLAG_PREFIX", "flag{demo_")
+FLAG_PREFIX = ""
 PORT = int(os.environ.get("CHALL_PORT", "18082"))
 db = None
 current_flag = ""
@@ -19,7 +19,7 @@ def get_db():
     return db
 
 def make_flag():
-    return FLAG_PREFIX + str(PORT) + "_" + ''.join(random.choices(string.ascii_lowercase+string.digits, k=12)) + "}"
+    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=31))
 
 class ChallHandler(BaseHTTPRequestHandler):
     def do_GET(self):
