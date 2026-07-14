@@ -37,7 +37,7 @@
         <div class="service-head">
           <div>
             <h3>{{ service.name }}</h3>
-            <p class="mono text-muted">{{ service.protocol }} :{{ service.port }}</p>
+            <p class="mono text-muted">{{ service.protocol }} :{{ service.port }} · {{ bannedCounts[service.id] || 0 }} banned flows</p>
           </div>
           <div class="interval-row">
             <label>Every</label>
@@ -88,7 +88,7 @@
               </div>
             </div>
           </div>
-          <div v-if="groupsForService(service.id).length === 0" class="empty-state">No mirrored groups for this service</div>
+          <div v-if="groupsForService(service.id).length === 0" class="empty-state">No mirrored groups — banned flows will appear here when targets are configured</div>
         </div>
       </div>
     </div>
@@ -176,6 +176,7 @@ const selectedAttempt = ref<MirrorAttempt | null>(null)
 const activeBucket = ref<'minute' | '10m' | '30m' | 'hour'>('10m')
 const chartBuckets = ['minute', '10m', '30m', 'hour'] as const
 const stats = ref<MirrorStats>({ total_requests: 0, successes: 0, success_rate: 0, flags: 0, teams: [], groups: [], series: { minute: [], '10m': [], '30m': [], hour: [] } })
+const bannedCounts = ref<Record<number, number>>({})
 
 interface MirrorAttempt { id: number; service_id: number; hash: string; flow_id: string; target_ip: string; target_port: number; success: boolean; flag: string; response: string; created_at: string }
 interface StatItem { target_ip?: string; hash?: string; name?: string; requests: number; successes: number; flags: number; success_rate: number }
@@ -184,16 +185,26 @@ interface MirrorStats { total_requests: number; successes: number; success_rate:
 
 async function fetchConfig() {
   try {
-    const [{ data: mirrorData }, { data: serviceData }, { data: groupData }, { data: statData }] = await Promise.all([
+    const [{ data: mirrorData }, { data: serviceData }, { data: groupData }, { data: statData }, { data: bannedData }] = await Promise.all([
       api.get('/mirroring'),
       api.get('/services'),
       api.get('/mirroring/groups'),
       api.get('/mirroring/stats'),
+      api.get('/flow-groups', { params: { top: 500 } }),
     ])
     config.value = { enabled: false, targets: [], services: [], ...mirrorData }
     services.value = serviceData
     mirroredGroups.value = groupData
     stats.value = statData
+    // Count banned groups per service
+    const counts: Record<number, number> = {}
+    for (const g of bannedData || []) {
+      if (g.banned || g.service_id) {
+        const sid = g.service_id || 0
+        counts[sid] = (counts[sid] || 0) + g.count
+      }
+    }
+    bannedCounts.value = counts
     for (const service of services.value) serviceConfig(service.id)
     for (const group of mirroredGroups.value) draftNames.value[group.hash] = group.name || ''
   } catch (e) { console.error('Failed to fetch mirroring config:', e) }
