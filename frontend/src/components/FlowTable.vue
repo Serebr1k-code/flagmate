@@ -116,12 +116,12 @@
             </tr>
             <tr v-if="collapseDuplicates && flow.group_count > 1" class="expand-row" @click.stop="toggleExpanded(flow)">
               <td :colspan="selectedFlow ? 1 : 6">
-                <span>{{ expandedHashes.has(flow.hash) ? '▴ collapse repeated streams' : `▾ ${flow.group_count - 1} repeated streams` }}</span>
+                <span>{{ expandedHashes.has(expandKey(flow)) ? '▴ collapse repeated streams' : `▾ ${flow.group_count - 1} repeated streams` }}</span>
               </td>
             </tr>
-            <template v-if="collapseDuplicates && expandedHashes.has(flow.hash)">
+            <template v-if="collapseDuplicates && expandedHashes.has(expandKey(flow))">
               <tr
-                v-for="item in expandedFlows[flow.hash] || []"
+                v-for="item in expandedFlows[expandKey(flow)] || []"
                 :key="item.id"
                 class="flow-row repeated-row"
                 :class="rowClass(item)"
@@ -321,21 +321,26 @@ function rowClass(flow: Flow) {
 }
 
 async function toggleExpanded(flow: Flow) {
-  if (expandedHashes.value.has(flow.hash)) {
-    expandedHashes.value.delete(flow.hash)
+  const key = expandKey(flow)
+  if (expandedHashes.value.has(key)) {
+    expandedHashes.value.delete(key)
     expandedHashes.value = new Set(expandedHashes.value)
     return
   }
-  expandedHashes.value.add(flow.hash)
+  expandedHashes.value.add(key)
   expandedHashes.value = new Set(expandedHashes.value)
-  if (!expandedFlows.value[flow.hash]) {
+  if (!expandedFlows.value[key]) {
     try {
       const { data } = await api.get('/flows/history', { params: { hash: flow.hash, limit: 100, offset: 1, checker: flow.checker ? '1' : '0', banned: flow.banned ? '1' : '0' } })
-      expandedFlows.value = { ...expandedFlows.value, [flow.hash]: data || [] }
+      expandedFlows.value = { ...expandedFlows.value, [key]: data || [] }
     } catch (e) {
       console.error('Failed to fetch repeated streams:', e)
     }
   }
+}
+
+function expandKey(flow: Flow) {
+  return `${flow.hash}_c${flow.checker ? 1 : 0}_b${flow.banned ? 1 : 0}`
 }
 
 async function fetchServices() {
