@@ -159,20 +159,22 @@ type ServiceMirrorConfig struct {
 }
 
 type FlowGroupMeta struct {
-	Hash          string `json:"hash"`
-	Name          string `json:"name"`
-	Checker       bool   `json:"checker"`
-	Count         int    `json:"count"`
-	ExampleFlowID string `json:"example_flow_id"`
-	FirstSeen     string `json:"first_seen"`
-	LastSeen      string `json:"last_seen"`
-	Destination   string `json:"destination"`
-	Method        string `json:"method"`
-	URI           string `json:"uri"`
-	ResponseCode  int    `json:"response_code"`
-	ServiceID     *int   `json:"service_id"`
-	Mirrored      bool   `json:"mirrored"`
-	LatestFlow    *Flow  `json:"latest_flow,omitempty"`
+	Hash          string  `json:"hash"`
+	Name          string  `json:"name"`
+	Checker       bool    `json:"checker"`
+	Count         int     `json:"count"`
+	ExampleFlowID string  `json:"example_flow_id"`
+	FirstSeen     string  `json:"first_seen"`
+	LastSeen      string  `json:"last_seen"`
+	Destination   string  `json:"destination"`
+	Method        string  `json:"method"`
+	URI           string  `json:"uri"`
+	ResponseCode  int     `json:"response_code"`
+	ServiceID     *int    `json:"service_id"`
+	Mirrored      bool    `json:"mirrored"`
+	StabilityPct  int     `json:"stability_pct"`
+	AvgInterval   float64 `json:"avg_interval"`
+	LatestFlow    *Flow   `json:"latest_flow,omitempty"`
 }
 
 type MirrorTarget struct {
@@ -2581,6 +2583,8 @@ func (a *App) flowGroupMeta(hash string, cnt int, first, last string, includeFlo
 		ResponseCode:  flow.ResponseCode,
 		ServiceID:     flow.ServiceID,
 		Mirrored:      flow.Mirrored,
+		StabilityPct:  flow.StabilityPct,
+		AvgInterval:   flow.AvgInterval,
 	}
 	if meta.URI == "" {
 		meta.URI = asString(flow.RawRequest["url"])
