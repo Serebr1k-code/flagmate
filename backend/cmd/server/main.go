@@ -3421,7 +3421,7 @@ func (a *App) runMirrorTick() {
 				t.Port = a.servicePort(*flow.ServiceID)
 			}
 			payload, _ := json.Marshal(map[string]any{"type": "flagmate_mirror", "flow": flow})
-			go a.sendMirrorPayloadRaw(t, string(payload))
+			go a.sendMirrorPayloadRaw(t, string(payload), flow.ServiceID, flow.Hash, flow.ID)
 		}
 	}
 }
@@ -3468,15 +3468,33 @@ func (a *App) mirrorMarkedServiceGroups(cfg ServiceMirrorConfig, targets []Mirro
 	}
 }
 
-func (a *App) sendMirrorPayloadRaw(target MirrorTarget, payload string) {
+func (a *App) sendMirrorPayloadRaw(target MirrorTarget, payload string, serviceIDPtr *int, hash string, flowID string) {
 	addr := net.JoinHostPort(target.IP, strconv.Itoa(target.Port))
+	serviceID := 0
+	if serviceIDPtr != nil {
+		serviceID = *serviceIDPtr
+	}
 	conn, err := net.DialTimeout("tcp", addr, 700*time.Millisecond)
 	if err != nil {
+		a.recordMirrorAttempt(serviceID, hash, flowID, target, false, "", "")
 		return
 	}
 	defer conn.Close()
 	_ = conn.SetWriteDeadline(time.Now().Add(700 * time.Millisecond))
-	conn.Write([]byte(payload + "\n"))
+	_, _ = conn.Write([]byte(payload + "\n"))
+	_ = conn.SetReadDeadline(time.Now().Add(700 * time.Millisecond))
+	buf := make([]byte, 4096)
+	n, _ := conn.Read(buf)
+	resp := strings.TrimSpace(string(buf[:n]))
+	flag := ""
+	if strings.Contains(resp, "flag{") || strings.Contains(resp, "flag:") {
+		re := regexp.MustCompile(`[A-Za-z0-9_+\-=]{31}`)
+		m := re.FindString(resp)
+		if m != "" {
+			flag = m
+		}
+	}
+	a.recordMirrorAttempt(serviceID, hash, flowID, target, flag != "", flag, resp)
 }
 
 func (a *App) servicePort(serviceID int) int {
