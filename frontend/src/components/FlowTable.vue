@@ -529,7 +529,7 @@ onUnmounted(disconnectLiveSocket)
 .flow-table-page.compact .table-container { overflow-x: hidden; }
 .flow-table-page.compact .table th,
 .flow-table-page.compact .table td { padding: 10px; }
-.flow-table-page.compact .flow-row.selected td { background-color: var(--surface-hover); color: var(--primary); font-weight: 600; }
+.flow-table-page.compact .flow-row.selected td { box-shadow: inset 3px 0 0 var(--primary); }
 .flow-table-page.compact .pagination { gap: 8px; font-size: 12px; }
 .page-header { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
 .header-title-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
