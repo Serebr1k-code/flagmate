@@ -1548,7 +1548,7 @@ func (a *App) enrichFlow(f *Flow) {
 	} else {
 		f.Destination = fmt.Sprintf("%s:%d", f.DstIP, f.DstPort)
 	}
-	pct, avg := a.stabilityMetrics(f.Hash)
+	pct, avg := a.stabilityMetrics(f.Hash, fmt.Sprintf("checker = %d", boolInt(f.Checker)), fmt.Sprintf("banned = %d", boolInt(f.Banned)))
 	f.StabilityPct = pct
 	f.AvgInterval = avg
 	f.Stable = pct >= 70
@@ -1614,8 +1614,16 @@ func (a *App) isMirroredGroup(hash string) bool {
 	return enabled == 1
 }
 
-func (a *App) stabilityMetrics(hash string) (int, float64) {
-	rows, err := a.db.Query(`SELECT created_at FROM flows WHERE hash = ? ORDER BY created_at ASC LIMIT 250`, hash)
+func (a *App) stabilityMetrics(hash string, extraWhere ...string) (int, float64) {
+	query := `SELECT created_at FROM flows WHERE hash = ?`
+	args := []any{hash}
+	for _, w := range extraWhere {
+		if w != "" {
+			query += ` AND ` + w
+		}
+	}
+	query += ` ORDER BY created_at ASC LIMIT 250`
+	rows, err := a.db.Query(query, args...)
 	if err != nil {
 		return 0, 0
 	}
