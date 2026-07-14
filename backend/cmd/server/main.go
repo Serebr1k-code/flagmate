@@ -3488,7 +3488,7 @@ func (a *App) sendMirrorPayloadRaw(target MirrorTarget, payload string, serviceI
 	resp := strings.TrimSpace(string(buf[:n]))
 	flag := ""
 	if strings.Contains(resp, "flag{") || strings.Contains(resp, "flag:") {
-		re := regexp.MustCompile(`[A-Za-z0-9_+\-=]{31}`)
+		re := regexp.MustCompile(`(?i)(?:\b[A-Za-z0-9_+\-=]{31}\b|flag\{[^\s{}]{4,128}\})`)
 		m := re.FindString(resp)
 		if m != "" {
 			flag = m
