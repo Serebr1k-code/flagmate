@@ -55,19 +55,24 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import api from '@/utils/api'
-import type { FlowGroup } from '@/types'
+import type { FlowGroup, Service } from '@/types'
 
 const groups = ref<FlowGroup[]>([])
 const sortedGroups = ref<FlowGroup[]>([])
 const draftNames = ref<Record<string, string>>({})
+const services = ref<Service[]>([])
 const topN = ref(50)
 const sortBy = ref('count')
 const emit = defineEmits<{ 'open-flow-id': [flowId: string] }>()
 
 async function fetchGroups() {
   try {
-    const { data } = await api.get('/flow-groups', { params: { top: topN.value } })
-    groups.value = data
+    const [{ data: groupsData }, { data: servicesData }] = await Promise.all([
+      api.get('/flow-groups', { params: { top: topN.value } }),
+      api.get('/services')
+    ])
+    services.value = servicesData
+    groups.value = groupsData
     for (const group of groups.value) draftNames.value[group.hash] = group.name || ''
     sortGroups()
   } catch (e) { console.error('Failed to fetch groups:', e) }
@@ -120,10 +125,12 @@ async function toggleChecker(group: FlowGroup) {
 
 function displayGroup(group: FlowGroup) {
   const uri = group.uri || group.latest_flow?.raw_request?.uri || group.latest_flow?.raw_request?.url || ''
-  const port = group.latest_flow?.dst_port || group.destination?.match(/:(\d+)/)?.[1] || ''
+  const dstPort = group.latest_flow?.dst_port || group.destination?.match(/:(\d+)/)?.[1] || ''
   const method = group.method || group.latest_flow?.raw_request?.method || 'HTTP'
-  const target = `${port}${String(uri).startsWith('/') ? uri : `/${uri}`}`
-  return `${method} ${target} -> ${group.response_code}`
+  const target = `${dstPort}${String(uri).startsWith('/') ? uri : `/${uri}`}`
+  const svc = services.value.find(s => s.id === group.service_id)
+  const svcName = svc?.name ? svc.name : `:${dstPort}`
+  return `${svcName} ${method} ${target} -> ${group.response_code}`
 }
 
 function formatTime(ts: string) { return ts ? new Date(ts).toLocaleString() : '—' }
