@@ -665,7 +665,7 @@ func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream
 	statusToSend := resp.StatusCode
 	bodyToSend := respBody
 
-	if bm == 1 && !groupIsChecker {
+	if bm == 1 {
 		bodyStr := string(respBody)
 		flagRe, _ := regexp.Compile(`(?i)(?:flag\{[^\s{}]{25}\}|\b[A-Za-z0-9_+\-=]{31}\b)`)
 		log.Printf("AUTOFLAG bm=%d checker=%v matched=%v body=%.80s", bm, isCheckerFlow(reqMeta, respMeta), flagRe.MatchString(bodyStr), bodyStr)
