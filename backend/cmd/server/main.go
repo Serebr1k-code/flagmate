@@ -1558,6 +1558,10 @@ func (a *App) enrichFlow(f *Flow) {
 	_ = a.db.QueryRow(`SELECT checker FROM flow_group_meta WHERE hash = ?`, f.Hash).Scan(&grpChecker)
 	if grpChecker == 1 {
 		f.Checker = true
+		if f.Banned {
+			f.Banned = false
+			_, _ = a.db.Exec(`UPDATE flows SET banned = 0 WHERE id = ?`, f.ID)
+		}
 	}
 	f.Marks = a.matchingMarks(*f)
 }
