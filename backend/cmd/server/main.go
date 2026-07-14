@@ -674,10 +674,11 @@ func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream
 		}
 	}
 
-	if bm == 1 && banned && !isCheckerFlow(reqMeta, respMeta) {
+	if bm == 1 && !isCheckerFlow(reqMeta, respMeta) {
 		bodyStr := string(respBody)
 		flagRe, _ := regexp.Compile(`(?i)(flag\{[^\s{}]{4,128}\})`)
 		if flagRe.MatchString(bodyStr) {
+			banned = true
 			fake := "flag{poisoned_" + strconv.FormatInt(time.Now().Unix(), 36) + "_" + strconv.Itoa(len(bodyStr)) + "}"
 			bodyStr = flagRe.ReplaceAllString(bodyStr, fake)
 			respMeta["body"] = bodyStr
