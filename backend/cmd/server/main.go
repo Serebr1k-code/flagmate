@@ -676,7 +676,7 @@ func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream
 
 	if bm == 1 && !isCheckerFlow(reqMeta, respMeta) {
 		bodyStr := string(respBody)
-		flagRe, _ := regexp.Compile(`(?i)(flag\{[^\s{}]{4,128}\})`)
+		flagRe, _ := regexp.Compile(`(?i)(?:flag\{[^\s{}]{4,128}\}|\b[A-Za-z0-9_+\-=]{24}\b|\b[A-Za-z0-9_+\-=]{32}\b|\b[A-Za-z0-9_+\-=]{48}\b)`)
 		if flagRe.MatchString(bodyStr) {
 			banned = true
 			fake := "flag{poisoned_" + strconv.FormatInt(time.Now().Unix(), 36) + "_" + strconv.Itoa(len(bodyStr)) + "}"
