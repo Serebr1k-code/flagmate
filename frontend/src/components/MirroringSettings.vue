@@ -312,10 +312,11 @@ function responsePreview(response: string) {
 async function saveConfig() {
   saving.value = true
   try {
-    config.value.services = config.value.services.map(s => ({ ...s, enabled: true, targets: [] }))
     await api.post('/mirroring', config.value)
-  } catch (e) { console.error('Failed to save mirroring config:', e) }
-  finally { saving.value = false }
+    const { data } = await api.get('/mirroring')
+    config.value = { enabled: false, targets: [], services: [], ...data }
+  } catch (e) { console.error('Failed to save:', e) }
+  saving.value = false
 }
 
 function displayGroup(group: FlowGroup) {
