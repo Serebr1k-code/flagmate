@@ -679,7 +679,7 @@ func (a *App) handleGateRequest(w http.ResponseWriter, r *http.Request, upstream
 		flagRe, _ := regexp.Compile(`(?i)(?:flag\{[^\s{}]{4,128}\}|\b[A-Za-z0-9_+\-=]{24}\b|\b[A-Za-z0-9_+\-=]{32}\b|\b[A-Za-z0-9_+\-=]{48}\b)`)
 		if flagRe.MatchString(bodyStr) {
 			banned = true
-			fake := "flag{poisoned_" + strconv.FormatInt(time.Now().Unix(), 36) + "_" + strconv.Itoa(len(bodyStr)) + "}"
+			fake := genFakeFlag(flagRe.FindString(bodyStr))
 			bodyStr = flagRe.ReplaceAllString(bodyStr, fake)
 			respMeta["body"] = bodyStr
 			resp.Header.Set("X-FlagMate-Poisoned", "flag")
@@ -1067,6 +1067,20 @@ func fakeNoise(seed string, i int) string {
 		parts = append(parts, p)
 	}
 	return strings.Join(parts, "|")
+}
+
+func genFakeFlag(original string) string {
+	if strings.HasPrefix(original, "flag{") {
+		rand := strconv.FormatInt(time.Now().UnixNano(), 36)
+		return "flag{" + rand[:min(16, len(rand))] + "}"
+	}
+	length := len(original)
+	out := make([]byte, length)
+	for i := 0; i < length; i++ {
+		out[i] = "abcdefghijklmnopqrstuvwxyz0123456789"[time.Now().UnixNano()%36]
+		time.Sleep(1)
+	}
+	return string(out)
 }
 
 func copyHeaders(dst, src http.Header) {
