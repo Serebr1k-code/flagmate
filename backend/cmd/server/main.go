@@ -569,14 +569,11 @@ func (a *App) startSuricataListener(ctx context.Context) {
 }
 
 func (a *App) startHTTPGate(ctx context.Context) {
-	upstream, err := url.Parse(a.cfg.GateUpstream)
-	if err != nil {
-		log.Printf("gate upstream parse error: %v", err)
-		return
-	}
 	gatePort := listenPortFromAddr(a.cfg.GateListen)
-	go a.startOneGate(ctx, a.cfg.GateListen, upstream)
-
+	upstream, err := url.Parse(a.cfg.GateUpstream)
+	if err == nil && upstream != nil && upstream.Host != "" {
+		go a.startOneGate(ctx, a.cfg.GateListen, upstream)
+	}
 	// Start additional gates for other registered TCP services
 	rows, err := a.db.Query(`SELECT name, port FROM services WHERE protocol = 'tcp' AND port NOT IN (0, ?)`, gatePort)
 	if err == nil {

@@ -14,7 +14,6 @@ services:
       SURICATA_PID: ${SURICATA_PID:-0}
       GATE_ENABLED: ${GATE_ENABLED:-true}
       GATE_LISTEN: ${GATE_LISTEN:-:18080}
-      GATE_UPSTREAM: ${GATE_UPSTREAM:-http://testservice:18080}
     volumes:
       - ./backend-data:/data
       - ./sockets:/var/run/suricata
@@ -23,34 +22,10 @@ services:
     ports:
       - "8080:8080"
       - "18080:18080"
-      - "18082:18082"
-      - "18083:18083"
     restart: unless-stopped
     networks:
       flagmate:
         ipv4_address: 172.28.0.2
-
-  testservice:
-    image: python:3.11-alpine
-    command: ["python", "/app/test_service.py"]
-    volumes:
-      - ./test_service.py:/app/test_service.py:ro
-    restart: unless-stopped
-    networks:
-      flagmate:
-        ipv4_address: 172.28.0.4
-
-  testservice2:
-    image: python:3.11-alpine
-    command: ["python", "/app/mirror_service.py"]
-    volumes:
-      - ./mirror_service.py:/app/mirror_service.py:ro
-    restart: unless-stopped
-    networks:
-      flagmate:
-        ipv4_address: 172.28.0.5
-    ports:
-      - "18081:18081"
 
   suricata:
     image: jasonish/suricata:latest
