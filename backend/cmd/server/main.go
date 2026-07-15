@@ -3488,16 +3488,40 @@ func (a *App) sendMirrorPayloadRaw(target MirrorTarget, payload, rawReq string, 
 	}
 	defer conn.Close()
 	_ = conn.SetWriteDeadline(time.Now().Add(700 * time.Millisecond))
-	// Use raw HTTP request if available (for real services), fall back to JSON envelope
-	sendData := payload
-	if rawReq != "" {
-		sendData = rawReq
+
+	// Determine protocol and send appropriate payload
+	var resp string
+	if strings.Contains(rawReq, "websocket upgrade") {
+		// WebSocket: send each frame as a separate write
+		frames := strings.Split(rawReq, "\n")
+		for _, frame := range frames {
+			frame = strings.TrimSpace(frame)
+			if frame == "" || frame == "websocket upgrade" {
+				continue
+			}
+			conn.Write([]byte(frame + "\n"))
+			time.Sleep(50 * time.Millisecond)
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		buf := make([]byte, 4096)
+		n, _ := conn.Read(buf)
+		resp = strings.TrimSpace(string(buf[:n]))
+	} else if rawReq != "" {
+		// Raw body (HTTP body or TCP payload)
+		conn.Write([]byte(rawReq))
+		_ = conn.SetReadDeadline(time.Now().Add(700 * time.Millisecond))
+		buf := make([]byte, 4096)
+		n, _ := conn.Read(buf)
+		resp = strings.TrimSpace(string(buf[:n]))
+	} else {
+		// Fallback: send JSON envelope
+		conn.Write([]byte(payload + "\n"))
+		_ = conn.SetReadDeadline(time.Now().Add(700 * time.Millisecond))
+		buf := make([]byte, 4096)
+		n, _ := conn.Read(buf)
+		resp = strings.TrimSpace(string(buf[:n]))
 	}
-	_, _ = conn.Write([]byte(sendData))
-	_ = conn.SetReadDeadline(time.Now().Add(700 * time.Millisecond))
-	buf := make([]byte, 4096)
-	n, _ := conn.Read(buf)
-	resp := strings.TrimSpace(string(buf[:n]))
+
 	flag := ""
 	if strings.Contains(resp, "flag{") || strings.Contains(resp, "flag:") {
 		re := regexp.MustCompile(`(?i)(?:\b[A-Za-z0-9_+\-=]{31}\b|flag\{[^\s{}]{4,128}\})`)
