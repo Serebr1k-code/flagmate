@@ -2,7 +2,6 @@ node_modules/
 dist/
 *.sock
 .env
-backend/server
 backend-data/
 suricata-logs/
 sockets/
