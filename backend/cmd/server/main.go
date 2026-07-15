@@ -179,8 +179,9 @@ type FlowGroupMeta struct {
 }
 
 type MirrorTarget struct {
-	IP   string `json:"ip"`
-	Port int    `json:"port"`
+	IP      string `json:"ip"`
+	Port    int    `json:"port"`
+	Webhook string `json:"webhook"`
 }
 
 type MirrorAttemptStat struct {
@@ -3503,6 +3504,9 @@ func (a *App) sendMirrorPayloadRaw(target MirrorTarget, payload string, serviceI
 		}
 	}
 	a.recordMirrorAttempt(serviceID, hash, flowID, target, flag != "", flag, resp)
+	if flag != "" && target.Webhook != "" {
+		go a.sendFlagWebhook(target.Webhook, flag, targetIP, target.Port, serviceID, hash)
+	}
 }
 
 func (a *App) servicePort(serviceID int) int {
@@ -3621,6 +3625,17 @@ func (a *App) recordMirrorAttempt(serviceID int, hash, flowID string, target Mir
 		response = response[:4096]
 	}
 	_, _ = a.db.Exec(`INSERT INTO mirror_attempts(service_id,hash,flow_id,target_ip,target_port,success,flag,response,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, serviceID, hash, flowID, target.IP, target.Port, boolInt(success), flag, response, time.Now().UTC().Format(time.RFC3339))
+}
+
+func (a *App) sendFlagWebhook(url, flag, targetIP string, targetPort, serviceID int, hash string) {
+	payload, _ := json.Marshal(map[string]any{"flag": flag, "target_ip": targetIP, "target_port": targetPort, "service_id": serviceID, "hash": hash, "timestamp": time.Now().UTC().Format(time.RFC3339)})
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(string(payload)))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 3 * time.Second}
+	client.Do(req)
 }
 
 func extractFlag(src string) string {

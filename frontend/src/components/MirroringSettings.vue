@@ -142,15 +142,19 @@
       </div>
       <div class="targets-list">
         <div v-for="(target, index) in config.targets" :key="index" class="target-item">
-          <span class="mono">{{ target.ip }}:{{ target.port || '<service port>' }}</span>
-          <input v-model.number="target.port" class="input target-port" type="number" min="0" max="65535" placeholder="port" @change="saveConfig" />
-          <button class="btn btn-sm btn-destructive" @click="removeTarget(index)">Remove</button>
+          <div class="target-row">
+            <span class="mono">{{ target.ip }}:{{ target.port || '<service port>' }}</span>
+            <input v-model.number="target.port" class="input target-port" type="number" min="0" max="65535" placeholder="port" @change="saveConfig" />
+            <input v-model="target.webhook" class="input target-webhook" placeholder="Webhook URL (Discord/Slack)" @change="saveConfig" />
+            <button class="btn btn-sm btn-destructive" @click="removeTarget(index)">Remove</button>
+          </div>
         </div>
         <div v-if="config.targets.length === 0" class="empty-state">No mirror targets</div>
       </div>
       <div class="add-target-form">
         <input v-model="newTargetIp" class="input" placeholder="Team IP" />
         <input v-model.number="newTargetPort" class="input target-port" type="number" min="0" max="65535" placeholder="Port override" />
+        <input v-model="newTargetWebhook" class="input target-webhook" placeholder="Webhook URL" />
         <button class="btn btn-primary" @click="addTarget">Add target</button>
         <button class="btn btn-outline" @click="saveConfig" :disabled="saving">{{ saving ? 'Saving...' : 'Save' }}</button>
       </div>
@@ -169,6 +173,7 @@ const mirroredGroups = ref<FlowGroup[]>([])
 const draftNames = ref<Record<string, string>>({})
 const newTargetIp = ref('')
 const newTargetPort = ref(0)
+const newTargetWebhook = ref('')
 const saving = ref(false)
 const expandedGroup = ref('')
 const selectedAttemptKey = ref('')
@@ -240,9 +245,10 @@ async function toggleMirroring() {
 function addTarget() {
 	const ip = newTargetIp.value.trim()
 	if (!ip) return
-	config.value.targets.push({ ip, port: Number(newTargetPort.value) || 0 })
-	newTargetIp.value = ''
-	newTargetPort.value = 0
+  config.value.targets.push({ ip, port: Number(newTargetPort.value) || 0, webhook: newTargetWebhook.value.trim() })
+  newTargetIp.value = ''
+  newTargetPort.value = 0
+  newTargetWebhook.value = ''
 	saveConfig()
 }
 
@@ -362,16 +368,11 @@ onMounted(fetchConfig)
 .mirrored-list, .targets-list { display: flex; flex-direction: column; gap: 8px; }
 .mirror-group-wrap { display: flex; flex-direction: column; gap: 8px; }
 .mirror-group { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background-color: var(--surface); }
-.target-item { display: grid; grid-template-columns: 1fr 120px auto; align-items: center; gap: 12px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background-color: var(--surface); }
-.mirror-group { cursor: pointer; }
-.mirror-group:hover { background-color: var(--surface-hover); }
-.group-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 6px; }
-.name-input { max-width: 260px; }
-.target-line { font-size: 13px; font-weight: 700; }
-.small { font-size: 12px; }
-.add-target-form { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-.add-target-form .input { flex: 1; min-width: 180px; }
+.target-item { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background-color: var(--surface); }
+.target-row { display: grid; grid-template-columns: 1fr 120px 1.4fr auto; align-items: center; gap: 10px; }
 .target-port { max-width: 140px; }
+.target-webhook { max-width: 100%; }
+.add-target-form .input { flex: 1; min-width: 140px; }
 .card-header { margin-bottom: 12px; }
 .card-title { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
 .team-drilldown { padding: 10px; border: 1px dashed var(--border); border-radius: 10px; background: color-mix(in srgb, var(--surface) 65%, transparent); }
