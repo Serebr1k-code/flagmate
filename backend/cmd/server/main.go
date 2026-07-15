@@ -3631,37 +3631,23 @@ func (a *App) recordMirrorAttempt(serviceID int, hash, flowID string, target Mir
 }
 
 func rebuildRawRequest(req map[string]any) string {
-	method := asString(req["method"])
-	if method == "" {
-		method = "GET"
+	// For TCP/netcat services, send just the request body
+	if body := asString(req["body"]); body != "" {
+		return body + "\n"
 	}
+	// Fallback: send the query string (GET params)
+	if query := asString(req["query"]); query != "" {
+		return query + "\n"
+	}
+	// Last resort: send the URI
 	uri := asString(req["uri"])
 	if uri == "" {
 		uri = asString(req["url"])
-		if uri == "" {
-			uri = "/"
-		}
 	}
-	headers := map[string]string{}
-	if h, ok := req["headers"].(map[string]any); ok {
-		for k, v := range h {
-			headers[k] = fmt.Sprint(v)
-		}
+	if uri != "" {
+		return uri + "\n"
 	}
-	body := asString(req["body"])
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf("%s %s HTTP/1.1\r\n", method, uri))
-	for k, v := range headers {
-		b.WriteString(fmt.Sprintf("%s: %s\r\n", k, v))
-	}
-	if body != "" && headers["Content-Length"] == "" {
-		b.WriteString(fmt.Sprintf("Content-Length: %d\r\n", len(body)))
-	}
-	b.WriteString("\r\n")
-	if body != "" {
-		b.WriteString(body)
-	}
-	return b.String()
+	return ""
 }
 
 func (a *App) sendFlagWebhook(url, flag, targetIP string, targetPort, serviceID int, hash string) {
