@@ -1,7 +1,4 @@
 services:
-  # ═══════════════════════════════════════
-  # Flagmate core
-  # ═══════════════════════════════════════
   backend:
     build:
       context: ./backend
@@ -61,75 +58,6 @@ services:
     networks:
       flagmate:
         ipv4_address: 172.28.0.3
-
-  # ═══════════════════════════════════════
-  # S4DFarm (flag collection farm)
-  # ═══════════════════════════════════════
-  farm-postgres:
-    image: postgres:14.1-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: farm
-      POSTGRES_PASSWORD: farm
-      POSTGRES_DB: farm
-    volumes:
-      - ./farm-data/db:/var/lib/postgresql/data
-    healthcheck:
-      test: pg_isready -U farm -d farm
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    networks:
-      flagmate:
-        ipv4_address: 172.28.0.10
-
-  farm-redis:
-    image: redis:7.2.0-alpine
-    restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
-    volumes:
-      - ./farm-data/redis:/data
-    networks:
-      flagmate:
-        ipv4_address: 172.28.0.11
-
-  farm:
-    build:
-      context: ./s4dfarm/server
-      dockerfile: ./docker/server/Dockerfile
-    volumes:
-      - ./s4dfarm/server/app:/app
-    environment:
-      REDIS_URL: 'redis://farm-redis:6379/0'
-      POSTGRES_DSN: 'host=farm-postgres port=5432 user=farm password=farm dbname=farm'
-      SERVER_PASSWORD: ${FARM_PASSWORD:-flagmate}
-    restart: unless-stopped
-    depends_on:
-      farm-postgres:
-        condition: service_healthy
-    ports:
-      - "127.0.0.1:5137:5000"
-    networks:
-      flagmate:
-        ipv4_address: 172.28.0.12
-
-  farm-celery:
-    build:
-      context: ./s4dfarm/server
-      dockerfile: ./docker/celery/Dockerfile
-    volumes:
-      - ./s4dfarm/server/app:/app
-    environment:
-      CELERY_BROKER_URL: 'redis://farm-redis:6379/1'
-      POSTGRES_DSN: 'host=farm-postgres port=5432 user=farm password=farm dbname=farm'
-    restart: unless-stopped
-    depends_on:
-      farm-postgres:
-        condition: service_healthy
-    networks:
-      flagmate:
-        ipv4_address: 172.28.0.13
 
 networks:
   flagmate:
