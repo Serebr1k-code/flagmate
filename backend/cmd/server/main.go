@@ -3423,7 +3423,8 @@ func (a *App) runMirrorTick() {
 				t.Port = a.servicePort(*flow.ServiceID)
 			}
 			payload, _ := json.Marshal(map[string]any{"type": "flagmate_mirror", "flow": flow})
-			go a.sendMirrorPayloadRaw(t, string(payload), flow.ServiceID, flow.Hash, flow.ID)
+			rawReq := rebuildRawRequest(flow.RawRequest)
+			go a.sendMirrorPayloadRaw(t, string(payload), rawReq, flow.ServiceID, flow.Hash, flow.ID)
 		}
 	}
 }
@@ -3470,7 +3471,7 @@ func (a *App) mirrorMarkedServiceGroups(cfg ServiceMirrorConfig, targets []Mirro
 	}
 }
 
-func (a *App) sendMirrorPayloadRaw(target MirrorTarget, payload string, serviceIDPtr *int, hash string, flowID string) {
+func (a *App) sendMirrorPayloadRaw(target MirrorTarget, payload, rawReq string, serviceIDPtr *int, hash string, flowID string) {
 	targetIP := target.IP
 	if targetIP == "127.0.0.1" || targetIP == "localhost" {
 		targetIP = "172.28.0.1"
@@ -3487,7 +3488,12 @@ func (a *App) sendMirrorPayloadRaw(target MirrorTarget, payload string, serviceI
 	}
 	defer conn.Close()
 	_ = conn.SetWriteDeadline(time.Now().Add(700 * time.Millisecond))
-	_, _ = conn.Write([]byte(payload + "\n"))
+	// Use raw HTTP request if available (for real services), fall back to JSON envelope
+	sendData := payload
+	if rawReq != "" {
+		sendData = rawReq
+	}
+	_, _ = conn.Write([]byte(sendData))
 	_ = conn.SetReadDeadline(time.Now().Add(700 * time.Millisecond))
 	buf := make([]byte, 4096)
 	n, _ := conn.Read(buf)
@@ -3622,6 +3628,40 @@ func (a *App) recordMirrorAttempt(serviceID int, hash, flowID string, target Mir
 		response = response[:4096]
 	}
 	_, _ = a.db.Exec(`INSERT INTO mirror_attempts(service_id,hash,flow_id,target_ip,target_port,success,flag,response,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, serviceID, hash, flowID, target.IP, target.Port, boolInt(success), flag, response, time.Now().UTC().Format(time.RFC3339))
+}
+
+func rebuildRawRequest(req map[string]any) string {
+	method := asString(req["method"])
+	if method == "" {
+		method = "GET"
+	}
+	uri := asString(req["uri"])
+	if uri == "" {
+		uri = asString(req["url"])
+		if uri == "" {
+			uri = "/"
+		}
+	}
+	headers := map[string]string{}
+	if h, ok := req["headers"].(map[string]any); ok {
+		for k, v := range h {
+			headers[k] = fmt.Sprint(v)
+		}
+	}
+	body := asString(req["body"])
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("%s %s HTTP/1.1\r\n", method, uri))
+	for k, v := range headers {
+		b.WriteString(fmt.Sprintf("%s: %s\r\n", k, v))
+	}
+	if body != "" && headers["Content-Length"] == "" {
+		b.WriteString(fmt.Sprintf("Content-Length: %d\r\n", len(body)))
+	}
+	b.WriteString("\r\n")
+	if body != "" {
+		b.WriteString(body)
+	}
+	return b.String()
 }
 
 func (a *App) sendFlagWebhook(url, flag, targetIP string, targetPort, serviceID int, hash string) {
