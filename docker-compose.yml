@@ -20,7 +20,7 @@ services:
       - ./suricata.yaml:/etc/suricata/suricata.yaml
       - ./assets/femboy:/app/poison-images:ro
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
       - "18080:18080"
     restart: unless-stopped
     networks:
@@ -54,7 +54,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "3000:80"
+      - "127.0.0.1:3000:80"
     restart: unless-stopped
     networks:
       flagmate:
