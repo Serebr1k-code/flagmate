@@ -136,27 +136,11 @@ type App struct {
 	db               *sql.DB
 	ws               *WS
 	upgrader         websocket.Upgrader
-	mirrorMu         sync.RWMutex
-	mirroring        MirroringConfig
-	mirrorDue        map[int]time.Time
 	poisonMu         sync.Mutex
 	recalcMu         sync.Mutex
 	poisonHits       map[string][]time.Time
 	poisonFlagMinute int64
 	poisonFlag       string
-}
-
-type MirroringConfig struct {
-	Enabled  bool                  `json:"enabled"`
-	Targets  []MirrorTarget        `json:"targets"`
-	Services []ServiceMirrorConfig `json:"services"`
-}
-
-type ServiceMirrorConfig struct {
-	ServiceID       int            `json:"service_id"`
-	Enabled         bool           `json:"enabled"`
-	IntervalSeconds int            `json:"interval_seconds"`
-	Targets         []MirrorTarget `json:"targets"`
 }
 
 type FlowGroupMeta struct {
@@ -224,16 +208,13 @@ func main() {
 			CheckOrigin:     func(_ *http.Request) bool { return true },
 		},
 		poisonHits: map[string][]time.Time{},
-		mirrorDue:  map[int]time.Time{},
 	}
 	app.migrateFlowHashes()
-	app.loadMirroring()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go app.startSuricataListener(ctx)
 	go app.startBanUpdater(ctx)
-	go app.startMirrorScheduler(ctx)
 	if cfg.GateEnabled {
 		go app.startHTTPGate(ctx)
 	}
@@ -277,7 +258,6 @@ func main() {
 		pr.Get("/flows/{id}", app.getFlow)
 		pr.Get("/flows/{id}/unique-words", app.uniqueWords)
 		pr.Post("/flows/{id}/label", app.labelFlow)
-		pr.Post("/flows/{id}/mirror", app.mirrorFlowGroup)
 		pr.Post("/flows/{id}/unban", app.unbanFlow)
 		pr.Get("/flows/{id}/matching-patterns", app.matchingPatternsForFlow)
 		pr.Post("/flows/{id}/remove-matching-patterns", app.removeMatchingPatternsForFlow)
@@ -286,11 +266,6 @@ func main() {
 		pr.Post("/flow-groups/{hash}/name", app.renameFlowGroup)
 		pr.Post("/flow-groups/{hash}/checker", app.markFlowGroupChecker)
 
-		pr.Get("/mirroring", app.getMirroring)
-		pr.Get("/mirroring/groups", app.mirroredGroups)
-		pr.Get("/mirroring/stats", app.mirroringStats)
-		pr.Get("/mirroring/attempts", app.mirroringAttempts)
-		pr.Post("/mirroring", app.setMirroring)
 		pr.Get("/stats/settings", app.getStatsSettings)
 		pr.Post("/stats/settings", app.setStatsSettings)
 		pr.Get("/stats/attack-sessions", app.attackSessions)
@@ -357,12 +332,8 @@ func initSchema(db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS flow_payloads (hash TEXT PRIMARY KEY, payload TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
 		`CREATE INDEX IF NOT EXISTS idx_flows_created_at ON flows(created_at DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_flows_hash ON flows(hash);`,
-		`CREATE TABLE IF NOT EXISTS mirroring (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL DEFAULT 0, targets TEXT NOT NULL DEFAULT '[]');`,
-		`CREATE TABLE IF NOT EXISTS mirror_groups (hash TEXT PRIMARY KEY, service_id INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
 		`CREATE TABLE IF NOT EXISTS flow_group_meta (hash TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', checker INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
-		`CREATE TABLE IF NOT EXISTS mirror_attempts (id INTEGER PRIMARY KEY AUTOINCREMENT, service_id INTEGER NOT NULL, hash TEXT NOT NULL, flow_id TEXT NOT NULL, target_ip TEXT NOT NULL, target_port INTEGER NOT NULL, success INTEGER NOT NULL DEFAULT 0, flag TEXT NOT NULL DEFAULT '', response TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
 		`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
-		`INSERT OR IGNORE INTO mirroring(id, enabled, targets) VALUES (1, 0, '[]');`,
 		`INSERT OR IGNORE INTO settings(key, value) VALUES ('poison_mode', 'media');`,
 		`INSERT OR IGNORE INTO settings(key, value) VALUES ('ban_mode', '1');`,
 	}
@@ -372,23 +343,19 @@ func initSchema(db *sql.DB) error {
 		}
 	}
 	_, _ = db.Exec(`ALTER TABLE patterns ADD COLUMN service_id INTEGER NULL`)
-	_, _ = db.Exec(`ALTER TABLE mirroring ADD COLUMN services TEXT NOT NULL DEFAULT '[]'`)
-	_, _ = db.Exec(`ALTER TABLE mirror_groups ADD COLUMN name TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE flow_group_meta ADD COLUMN name TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE flow_group_meta ADD COLUMN checker INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`ALTER TABLE marks ADD COLUMN active INTEGER NOT NULL DEFAULT 1`)
 	_, _ = db.Exec(`ALTER TABLE marks ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`ALTER TABLE flows ADD COLUMN req_hash TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE flows ADD COLUMN resp_hash TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE flows ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_patterns_service ON patterns(service_id)`)
 	_, _ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_patterns_unique ON patterns(COALESCE(service_id,0), pattern)`)
-	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_mirror_groups_service ON mirror_groups(service_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_flows_service_created ON flows(service_id, created_at DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_flows_hash_created ON flows(hash, created_at DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_flows_banned ON flows(banned)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_flows_checker ON flows(checker)`)
-	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_mirror_attempts_group ON mirror_attempts(hash, target_ip, created_at DESC)`)
-	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_mirror_attempts_created ON mirror_attempts(created_at DESC)`)
 	_, _ = db.Exec(`UPDATE marks SET regex = ? WHERE lower(name) = 'flag' AND regex LIKE '%A-Za-z0-9_%'`, defaultFlagRegex())
 	return nil
 }
@@ -436,7 +403,6 @@ func (a *App) migrateFlowHashes() {
 		}
 	}
 	_, _ = tx.Exec(`DELETE FROM flow_group_meta`)
-	_, _ = tx.Exec(`DELETE FROM mirror_groups`)
 	_, _ = tx.Exec(`INSERT INTO settings(key,value) VALUES ('flow_hash_version','2') ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
 	if err := tx.Commit(); err != nil {
 		log.Printf("flow hash migration commit error: %v", err)
@@ -1190,7 +1156,6 @@ func (a *App) handleEVE(raw string) error {
 		return err
 	}
 	if asString(ev["event_type"]) != "http" {
-		a.forwardMirror(raw)
 		return nil
 	}
 
@@ -1263,7 +1228,6 @@ func (a *App) handleEVE(raw string) error {
 	}
 	a.enrichFlow(&flow)
 	a.broadcastFlow(flow)
-	a.forwardMirror(raw)
 	return nil
 }
 
@@ -1611,7 +1575,6 @@ func (a *App) enrichFlow(f *Flow) {
 	f.StabilityPct = pct
 	f.AvgInterval = avg
 	f.Stable = pct >= 70
-	f.Mirrored = a.isMirroredGroup(f.Hash)
 	f.GroupName = a.groupName(f.Hash)
 	_ = a.db.QueryRow(`SELECT COUNT(*) FROM flows WHERE hash = ? AND checker = ? AND banned = ?`, f.Hash, boolInt(f.Checker), boolInt(f.Banned)).Scan(&f.GroupCount)
 	var grpChecker int
@@ -1678,18 +1641,7 @@ func (a *App) groupName(hash string) string {
 	if err := a.db.QueryRow(`SELECT name FROM flow_group_meta WHERE hash = ?`, hash).Scan(&name); err == nil && strings.TrimSpace(name) != "" {
 		return name
 	}
-	if err := a.db.QueryRow(`SELECT name FROM mirror_groups WHERE hash = ?`, hash).Scan(&name); err == nil && strings.TrimSpace(name) != "" {
-		return name
-	}
 	return ""
-}
-
-func (a *App) isMirroredGroup(hash string) bool {
-	var enabled int
-	if err := a.db.QueryRow(`SELECT enabled FROM mirror_groups WHERE hash = ?`, hash).Scan(&enabled); err != nil {
-		return false
-	}
-	return enabled == 1
 }
 
 func (a *App) stabilityMetrics(hash string, extraWhere ...string) (int, float64) {
@@ -2421,35 +2373,6 @@ func (a *App) labelFlow(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (a *App) mirrorFlowGroup(w http.ResponseWriter, r *http.Request) {
-	flow, err := a.flowByID(chi.URLParam(r, "id"))
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "flow not found"})
-		return
-	}
-	var in struct {
-		Enabled bool `json:"enabled"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
-		return
-	}
-	if flow.ServiceID == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "flow has no service"})
-		return
-	}
-	if in.Enabled {
-		_, err = a.db.Exec(`INSERT INTO mirror_groups(hash, service_id, enabled, created_at) VALUES (?, ?, 1, ?) ON CONFLICT(hash) DO UPDATE SET service_id=excluded.service_id, enabled=1`, flow.Hash, *flow.ServiceID, time.Now().UTC().Format(time.RFC3339))
-	} else {
-		_, err = a.db.Exec(`UPDATE mirror_groups SET enabled = 0 WHERE hash = ?`, flow.Hash)
-	}
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "hash": flow.Hash, "enabled": in.Enabled})
-}
-
 func (a *App) unbanFlow(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	_, err := a.db.Exec(`UPDATE flows SET banned = 0 WHERE id = ?`, id)
@@ -2731,145 +2654,6 @@ func (a *App) markFlowGroupChecker(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (a *App) loadMirroring() {
-	row := a.db.QueryRow(`SELECT enabled, targets, services FROM mirroring WHERE id = 1`)
-	var enabled int
-	var targets string
-	var services string
-	if err := row.Scan(&enabled, &targets, &services); err != nil {
-		return
-	}
-	cfg := MirroringConfig{Enabled: enabled == 1, Targets: []MirrorTarget{}, Services: []ServiceMirrorConfig{}}
-	_ = json.Unmarshal([]byte(targets), &cfg.Targets)
-	_ = json.Unmarshal([]byte(services), &cfg.Services)
-	a.mirrorMu.Lock()
-	a.mirroring = cfg
-	a.mirrorMu.Unlock()
-}
-
-func (a *App) getMirroring(w http.ResponseWriter, _ *http.Request) {
-	a.mirrorMu.RLock()
-	cfg := a.mirroring
-	a.mirrorMu.RUnlock()
-	writeJSON(w, http.StatusOK, cfg)
-}
-
-func (a *App) mirroredGroups(w http.ResponseWriter, _ *http.Request) {
-	rows, err := a.db.Query(`SELECT mg.hash, mg.service_id, COUNT(f.id), MIN(f.created_at), MAX(f.created_at) FROM mirror_groups mg LEFT JOIN flows f ON f.hash = mg.hash WHERE mg.enabled = 1 GROUP BY mg.hash, mg.service_id ORDER BY mg.service_id ASC, MAX(f.created_at) DESC`)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	defer rows.Close()
-	out := []FlowGroupMeta{}
-	for rows.Next() {
-		var hash string
-		var serviceID int
-		var cnt int
-		var first, last sql.NullString
-		if rows.Scan(&hash, &serviceID, &cnt, &first, &last) != nil {
-			continue
-		}
-		meta, ok := a.flowGroupMeta(hash, cnt, first.String, last.String, true)
-		if !ok {
-			continue
-		}
-		if meta.ServiceID == nil {
-			meta.ServiceID = intPtr(serviceID)
-		}
-		out = append(out, meta)
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-func (a *App) mirroringAttempts(w http.ResponseWriter, r *http.Request) {
-	hash := strings.TrimSpace(r.URL.Query().Get("hash"))
-	targetIP := strings.TrimSpace(r.URL.Query().Get("target_ip"))
-	if hash == "" || targetIP == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "hash and target_ip required"})
-		return
-	}
-	limit := min(200, max(1, parseInt(r.URL.Query().Get("limit"), 50)))
-	rows, err := a.db.Query(`SELECT id,service_id,hash,flow_id,target_ip,target_port,success,flag,response,created_at FROM mirror_attempts WHERE hash = ? AND target_ip = ? ORDER BY created_at DESC LIMIT ?`, hash, targetIP, limit)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	defer rows.Close()
-	out := []map[string]any{}
-	for rows.Next() {
-		var id, serviceID, port, success int
-		var hash, flowID, ip, flag, response, createdAt string
-		if rows.Scan(&id, &serviceID, &hash, &flowID, &ip, &port, &success, &flag, &response, &createdAt) == nil {
-			out = append(out, map[string]any{"id": id, "service_id": serviceID, "hash": hash, "flow_id": flowID, "target_ip": ip, "target_port": port, "success": success == 1, "flag": flag, "response": response, "created_at": createdAt})
-		}
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-func (a *App) mirroringStats(w http.ResponseWriter, _ *http.Request) {
-	rows, err := a.db.Query(`SELECT service_id, hash, target_ip, success, flag, created_at FROM mirror_attempts ORDER BY created_at ASC`)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	defer rows.Close()
-	attempts := []MirrorAttemptStat{}
-	for rows.Next() {
-		var serviceID, success int
-		var hash, ip, flag, created string
-		if rows.Scan(&serviceID, &hash, &ip, &success, &flag, &created) != nil {
-			continue
-		}
-		t, _ := time.Parse(time.RFC3339, created)
-		attempts = append(attempts, MirrorAttemptStat{ServiceID: serviceID, Hash: hash, TargetIP: ip, Success: success == 1, Flag: flag, CreatedAt: t})
-	}
-	teamStats := map[string]map[string]any{}
-	groupStats := map[string]map[string]any{}
-	uniqueFlags := map[string]struct{}{}
-	total := len(attempts)
-	successes := 0
-	for _, aitem := range attempts {
-		if _, ok := teamStats[aitem.TargetIP]; !ok {
-			teamStats[aitem.TargetIP] = map[string]any{"target_ip": aitem.TargetIP, "requests": 0, "successes": 0, "flags": 0}
-		}
-		if _, ok := groupStats[aitem.Hash]; !ok {
-			groupStats[aitem.Hash] = map[string]any{"hash": aitem.Hash, "requests": 0, "successes": 0, "flags": 0, "name": a.groupName(aitem.Hash)}
-		}
-		incStat(teamStats[aitem.TargetIP], "requests")
-		incStat(groupStats[aitem.Hash], "requests")
-		if aitem.Success {
-			successes++
-			incStat(teamStats[aitem.TargetIP], "successes")
-			incStat(groupStats[aitem.Hash], "successes")
-		}
-		if aitem.Flag != "" {
-			key := aitem.TargetIP + "|" + aitem.Flag
-			if _, ok := uniqueFlags[key]; !ok {
-				uniqueFlags[key] = struct{}{}
-				incStat(teamStats[aitem.TargetIP], "flags")
-				incStat(groupStats[aitem.Hash], "flags")
-			}
-		}
-	}
-	teams := mapValuesWithRate(teamStats)
-	groups := mapValuesWithRate(groupStats)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"total_requests": total,
-		"successes":      successes,
-		"success_rate":   percent(successes, total),
-		"flags":          len(uniqueFlags),
-		"teams":          teams,
-		"groups":         groups,
-		"series": map[string]any{
-			"minute": bucketAttempts(attempts, time.Minute),
-			"10m":    bucketAttempts(attempts, 10*time.Minute),
-			"30m":    bucketAttempts(attempts, 30*time.Minute),
-			"hour":   bucketAttempts(attempts, time.Hour),
-		},
-	})
-}
-
 func (a *App) getStatsSettings(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"team_name": a.setting("stats_team_name"), "board_url": a.setting("stats_board_url")})
 }
@@ -3131,75 +2915,11 @@ func mapValuesWithRate(src map[string]map[string]any) []map[string]any {
 	return out
 }
 
-func bucketAttempts(attempts []MirrorAttemptStat, step time.Duration) []map[string]any {
-	if len(attempts) == 0 {
-		return []map[string]any{}
-	}
-	type bucket struct{ Requests, Successes, Flags int }
-	buckets := map[int64]*bucket{}
-	seenFlags := map[string]struct{}{}
-	for _, item := range attempts {
-		if item.CreatedAt.IsZero() {
-			continue
-		}
-		key := item.CreatedAt.Truncate(step).Unix()
-		b := buckets[key]
-		if b == nil {
-			b = &bucket{}
-			buckets[key] = b
-		}
-		b.Requests++
-		if item.Success {
-			b.Successes++
-		}
-		if item.Flag != "" {
-			flagKey := strconv.FormatInt(key, 10) + "|" + item.TargetIP + "|" + item.Flag
-			if _, ok := seenFlags[flagKey]; !ok {
-				seenFlags[flagKey] = struct{}{}
-				b.Flags++
-			}
-		}
-	}
-	keys := make([]int64, 0, len(buckets))
-	for key := range buckets {
-		keys = append(keys, key)
-	}
-	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
-	out := make([]map[string]any, 0, len(keys))
-	for _, key := range keys {
-		b := buckets[key]
-		out = append(out, map[string]any{"ts": time.Unix(key, 0).UTC().Format(time.RFC3339), "requests": b.Requests, "successes": b.Successes, "flags": b.Flags, "success_rate": percent(b.Successes, b.Requests)})
-	}
-	if len(out) > 60 {
-		out = out[len(out)-60:]
-	}
-	return out
-}
-
 func percent(part, total int) float64 {
 	if total == 0 {
 		return 0
 	}
 	return math.Round((float64(part)/float64(total))*1000) / 10
-}
-
-func (a *App) setMirroring(w http.ResponseWriter, r *http.Request) {
-	var cfg MirroringConfig
-	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
-		return
-	}
-	b, _ := json.Marshal(cfg.Targets)
-	sb, _ := json.Marshal(cfg.Services)
-	_, err := a.db.Exec(`UPDATE mirroring SET enabled = ?, targets = ?, services = ? WHERE id = 1`, boolInt(cfg.Enabled), string(b), string(sb))
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	a.mirrorMu.Lock()
-	a.mirroring = cfg
-	a.mirrorMu.Unlock()
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (a *App) getSettings(w http.ResponseWriter, _ *http.Request) {
@@ -3244,7 +2964,6 @@ func (a *App) resetHistory(w http.ResponseWriter, r *http.Request) {
 		`DELETE FROM flows`,
 		`DELETE FROM flow_payloads`,
 		`DELETE FROM mirror_attempts`,
-		`DELETE FROM mirror_groups`,
 		`DELETE FROM flow_group_meta`,
 	}
 	if deleteBansServices {
@@ -3261,11 +2980,6 @@ func (a *App) resetHistory(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	_, _ = a.db.Exec(`UPDATE mirroring SET enabled = 0, targets = '[]', services = '[]' WHERE id = 1`)
-	a.mirrorMu.Lock()
-	a.mirroring = MirroringConfig{Enabled: false, Targets: []MirrorTarget{}, Services: []ServiceMirrorConfig{}}
-	a.mirrorMu.Unlock()
-	a.mirrorDue = map[int]time.Time{}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "delete_bans_services": deleteBansServices})
 }
 
@@ -3301,27 +3015,6 @@ func (a *App) poisonMode() string {
 		return "media"
 	}
 	return mode
-}
-
-func (a *App) forwardMirror(raw string) {
-	a.mirrorMu.RLock()
-	cfg := a.mirroring
-	a.mirrorMu.RUnlock()
-	if !cfg.Enabled || len(cfg.Targets) == 0 {
-		return
-	}
-	for _, t := range cfg.Targets {
-		go func(target MirrorTarget) {
-			addr := net.JoinHostPort(target.IP, strconv.Itoa(target.Port))
-			conn, err := net.DialTimeout("tcp", addr, 300*time.Millisecond)
-			if err != nil {
-				return
-			}
-			defer conn.Close()
-			_ = conn.SetWriteDeadline(time.Now().Add(300 * time.Millisecond))
-			_, _ = conn.Write([]byte(raw + "\n"))
-		}(t)
-	}
 }
 
 func (a *App) startBanUpdater(ctx context.Context) {
@@ -3360,92 +3053,6 @@ func (a *App) recheckStaleFlows() {
 		}
 	}
 }
-func (a *App) startMirrorScheduler(ctx context.Context) {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			a.runMirrorTick()
-		}
-	}
-}
-
-func (a *App) runMirrorTick() {
-	a.mirrorMu.RLock()
-	cfg := a.mirroring
-	a.mirrorMu.RUnlock()
-	if !cfg.Enabled || len(cfg.Targets) == 0 {
-		return
-	}
-	since := time.Now().Add(-12 * time.Second)
-	rows, err := a.db.Query(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at FROM flows WHERE banned = 1 AND created_at >= ? ORDER BY created_at DESC LIMIT 200`, since.UTC().Format(time.RFC3339))
-	if err != nil {
-		log.Printf("mirror banned query: %v", err)
-		return
-	}
-	defer rows.Close()
-	for rows.Next() {
-		flow, err := scanFlow(rows)
-		if err != nil {
-			continue
-		}
-		a.hydrateFlowPayloads(&flow)
-		a.enrichFlow(&flow)
-		for _, target := range cfg.Targets {
-			t := target
-			if t.Port < 1 && flow.ServiceID != nil {
-				t.Port = a.servicePort(*flow.ServiceID)
-			}
-			payload, _ := json.Marshal(map[string]any{"type": "flagmate_mirror", "flow": flow})
-			go a.sendMirrorPayloadRaw(t, string(payload))
-		}
-	}
-}
-
-func (a *App) mirrorMarkedServiceGroups(cfg ServiceMirrorConfig, targets []MirrorTarget) {
-	rows, err := a.db.Query(`SELECT hash FROM mirror_groups WHERE service_id = ? AND enabled = 1`, cfg.ServiceID)
-	if err != nil {
-		log.Printf("mirror groups query error: %v", err)
-		return
-	}
-	hashes := []string{}
-	for rows.Next() {
-		var hash string
-		if rows.Scan(&hash) == nil {
-			hashes = append(hashes, hash)
-		}
-	}
-	_ = rows.Close()
-	servicePort := a.servicePort(cfg.ServiceID)
-	if servicePort < 1 {
-		return
-	}
-	for _, hash := range hashes {
-		row := a.db.QueryRow(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at FROM flows WHERE hash = ? ORDER BY created_at DESC LIMIT 1`, hash)
-		flow, err := scanFlowRow(row)
-		if err != nil {
-			continue
-		}
-		a.hydrateFlowPayloads(&flow)
-		a.enrichFlow(&flow)
-		payload, _ := json.Marshal(map[string]any{"type": "flagmate_mirror", "service_id": cfg.ServiceID, "hash": hash, "flow": flow})
-		for _, target := range targets {
-			if target.Port < 1 {
-				target.Port = servicePort
-			}
-			success, flag, response := false, "", ""
-			if isWebSocketFlow(flow) {
-				success, flag, response = a.sendWebSocketMirror(target, flow)
-			} else {
-				success, flag, response = a.sendMirrorPayload(target, string(payload)+"\n")
-			}
-			a.recordMirrorAttempt(cfg.ServiceID, hash, flow.ID, target, success, flag, response)
-		}
-	}
-}
 
 func (a *App) sendMirrorPayloadRaw(target MirrorTarget, payload string) {
 	addr := net.JoinHostPort(target.IP, strconv.Itoa(target.Port))
@@ -3458,36 +3065,6 @@ func (a *App) sendMirrorPayloadRaw(target MirrorTarget, payload string) {
 	conn.Write([]byte(payload + "\n"))
 }
 
-func (a *App) servicePort(serviceID int) int {
-	var port int
-	if err := a.db.QueryRow(`SELECT port FROM services WHERE id = ?`, serviceID).Scan(&port); err != nil {
-		return 0
-	}
-	return port
-}
-
-func (a *App) sendMirrorPayload(target MirrorTarget, payload string) (bool, string, string) {
-	addr := net.JoinHostPort(target.IP, strconv.Itoa(target.Port))
-	conn, err := net.DialTimeout("tcp", addr, 700*time.Millisecond)
-	if err != nil {
-		return false, "", err.Error()
-	}
-	defer conn.Close()
-	_ = conn.SetWriteDeadline(time.Now().Add(700 * time.Millisecond))
-	if _, err := conn.Write([]byte(payload)); err != nil {
-		return false, "", err.Error()
-	}
-	_ = conn.SetReadDeadline(time.Now().Add(1200 * time.Millisecond))
-	buf := make([]byte, 8192)
-	n, _ := conn.Read(buf)
-	response := ""
-	if n > 0 {
-		response = string(buf[:n])
-	}
-	flag := extractFlag(response)
-	return flag != "", flag, response
-}
-
 func isWebSocketFlow(flow Flow) bool {
 	if flow.ResponseCode == http.StatusSwitchingProtocols {
 		return true
@@ -3496,61 +3073,6 @@ func isWebSocketFlow(flow Flow) bool {
 		return strings.EqualFold(asString(headers["Upgrade"]), "websocket")
 	}
 	return false
-}
-
-func (a *App) sendWebSocketMirror(target MirrorTarget, flow Flow) (bool, string, string) {
-	addr := net.JoinHostPort(target.IP, strconv.Itoa(target.Port))
-	conn, err := net.DialTimeout("tcp", addr, 1200*time.Millisecond)
-	if err != nil {
-		return false, "", err.Error()
-	}
-	defer conn.Close()
-	uri := asString(flow.RawRequest["uri"])
-	if uri == "" {
-		uri = "/"
-	}
-	if q := asString(flow.RawRequest["query"]); q != "" {
-		uri += "?" + q
-	}
-	keySeed := sha256.Sum256([]byte(fmt.Sprintf("%d:%s:%s", time.Now().UnixNano(), target.IP, flow.ID)))
-	key := base64.StdEncoding.EncodeToString(keySeed[:16])
-	req := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nUser-Agent: Flagmate-Mirror\r\n\r\n", uri, addr, key)
-	_ = conn.SetDeadline(time.Now().Add(2500 * time.Millisecond))
-	if _, err := conn.Write([]byte(req)); err != nil {
-		return false, "", err.Error()
-	}
-	br := bufio.NewReader(conn)
-	resp, err := http.ReadResponse(br, nil)
-	if err != nil {
-		return false, "", err.Error()
-	}
-	var transcript strings.Builder
-	transcript.WriteString(resp.Status + "\n")
-	for k, vals := range resp.Header {
-		transcript.WriteString(k + ": " + strings.Join(vals, ", ") + "\n")
-	}
-	clientFrames := strings.Split(strings.TrimSpace(asString(flow.RawRequest["body"])), "\n")
-	for _, frame := range clientFrames {
-		frame = strings.TrimSpace(frame)
-		if frame == "" {
-			continue
-		}
-		if _, err := conn.Write(maskedWebSocketTextFrame(frame)); err != nil {
-			return false, "", transcript.String() + err.Error()
-		}
-	}
-	buf := make([]byte, 8192)
-	_ = conn.SetReadDeadline(time.Now().Add(1200 * time.Millisecond))
-	n, _ := br.Read(buf)
-	if n > 0 {
-		frames := decodeWebSocketTextFrames(buf[:n], false)
-		for _, frame := range frames {
-			transcript.WriteString(frame + "\n")
-		}
-	}
-	response := transcript.String()
-	flag := extractFlag(response)
-	return flag != "", flag, response
 }
 
 func maskedWebSocketTextFrame(text string) []byte {
@@ -3567,13 +3089,6 @@ func maskedWebSocketTextFrame(text string) []byte {
 		out = append(out, b^mask[i%4])
 	}
 	return out
-}
-
-func (a *App) recordMirrorAttempt(serviceID int, hash, flowID string, target MirrorTarget, success bool, flag, response string) {
-	if len(response) > 4096 {
-		response = response[:4096]
-	}
-	_, _ = a.db.Exec(`INSERT INTO mirror_attempts(service_id,hash,flow_id,target_ip,target_port,success,flag,response,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, serviceID, hash, flowID, target.IP, target.Port, boolInt(success), flag, response, time.Now().UTC().Format(time.RFC3339))
 }
 
 func extractFlag(src string) string {

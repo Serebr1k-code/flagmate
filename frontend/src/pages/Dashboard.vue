@@ -80,7 +80,6 @@ import FlowGroups from '@/components/FlowGroups.vue'
 import ServiceManager from '@/components/ServiceManager.vue'
 import BanPanel from '@/components/BanPanel.vue'
 import MarksPanel from '@/components/MarksPanel.vue'
-import MirroringSettings from '@/components/MirroringSettings.vue'
 import StatsPanel from '@/components/StatsPanel.vue'
 import SettingsPanel from '@/components/SettingsPanel.vue'
 import FlowDetail from '@/components/FlowDetail.vue'
@@ -111,7 +110,6 @@ const tabs = [
   { id: 'services', label: 'Services', component: ServiceManager },
   { id: 'bans', label: 'Bans', component: BanPanel },
   { id: 'marks', label: 'Marks', component: MarksPanel },
-  { id: 'mirroring', label: 'Mirroring', component: MirroringSettings },
   { id: 'stats', label: 'Stats', component: StatsPanel },
   { id: 'settings', label: 'Settings', component: SettingsPanel },
 ]

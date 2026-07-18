@@ -82,12 +82,6 @@ export interface FlowGroup {
   latest_flow?: Flow
 }
 
-export interface MirroringConfig {
-  enabled: boolean
-  targets: { ip: string; port: number; webhook?: string }[]
-  services: ServiceMirrorConfig[]
-}
-
 export interface ServiceMirrorConfig {
   service_id: number
   enabled: boolean
