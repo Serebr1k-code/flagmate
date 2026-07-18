@@ -6,16 +6,44 @@ services:
     environment:
       UI_PASSWORD: ${UI_PASSWORD:-admin}
       JWT_SECRET: ${JWT_SECRET:-supersecretjwtkey}
-      DB_PATH: /data/flagmate.db
-      GATE_ENABLED: "true"
-      GATE_LISTEN: :18080
+      STABLE_THRESHOLD: ${STABLE_THRESHOLD:-5}
+      EVE_SOCKET: ${EVE_SOCKET:-/var/run/suricata/eve.sock}
+      DB_PATH: ${DB_PATH:-/data/flagmate.db}
+      AUTO_HOOK_SURICATA: ${AUTO_HOOK_SURICATA:-true}
+      SURICATA_YAML_PATH: ${SURICATA_YAML_PATH:-/etc/suricata/suricata.yaml}
+      SURICATA_PID: ${SURICATA_PID:-0}
+      GATE_ENABLED: ${GATE_ENABLED:-true}
+      GATE_LISTEN: ${GATE_LISTEN:-:18080}
     volumes:
       - ./backend-data:/data
+      - ./sockets:/var/run/suricata
+      - ./suricata.yaml:/etc/suricata/suricata.yaml
+      - ./assets/femboy:/app/poison-images:ro
     ports:
       - "127.0.0.1:8080:8080"
     restart: unless-stopped
     networks:
       flagmate:
+        ipv4_address: 172.28.0.2
+
+  suricata:
+    image: jasonish/suricata:latest
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        IFACE=$$(ip -o -4 route show to default | awk '{print $$5}' | head -1);
+        exec suricata -c /etc/suricata/suricata.yaml -i "lo" -l /var/log/suricata -S /etc/suricata/rules/ctf.rules
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_NICE
+    volumes:
+      - ./suricata.yaml:/etc/suricata/suricata.yaml:ro
+      - ./rules:/etc/suricata/rules:ro
+      - ./sockets:/var/run/suricata
+      - ./suricata-logs:/var/log/suricata
+    restart: unless-stopped
 
   frontend:
     build:
@@ -28,7 +56,11 @@ services:
     restart: unless-stopped
     networks:
       flagmate:
+        ipv4_address: 172.28.0.3
 
 networks:
   flagmate:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
