@@ -179,14 +179,8 @@ type FlowGroupMeta struct {
 }
 
 type MirrorTarget struct {
-<<<<<<< Updated upstream
-	IP      string `json:"ip"`
-	Port    int    `json:"port"`
-	Webhook string `json:"webhook"`
-=======
 	IP   string `json:"ip"`
 	Port int    `json:"port"`
->>>>>>> Stashed changes
 }
 
 type MirrorAttemptStat struct {
@@ -287,10 +281,6 @@ func main() {
 		pr.Post("/flows/{id}/unban", app.unbanFlow)
 		pr.Get("/flows/{id}/matching-patterns", app.matchingPatternsForFlow)
 		pr.Post("/flows/{id}/remove-matching-patterns", app.removeMatchingPatternsForFlow)
-<<<<<<< Updated upstream
-		pr.Get("/flows/banned-counts", app.bannedCounts)
-=======
->>>>>>> Stashed changes
 
 		pr.Get("/flow-groups", app.flowGroups)
 		pr.Post("/flow-groups/{hash}/name", app.renameFlowGroup)
@@ -577,13 +567,6 @@ func (a *App) startSuricataListener(ctx context.Context) {
 }
 
 func (a *App) startHTTPGate(ctx context.Context) {
-<<<<<<< Updated upstream
-	gatePort := listenPortFromAddr(a.cfg.GateListen)
-	upstream, err := url.Parse(a.cfg.GateUpstream)
-	if err == nil && upstream != nil && upstream.Host != "" {
-		go a.startOneGate(ctx, a.cfg.GateListen, upstream)
-	}
-=======
 	upstream, err := url.Parse(a.cfg.GateUpstream)
 	if err != nil {
 		log.Printf("gate upstream parse error: %v", err)
@@ -592,7 +575,6 @@ func (a *App) startHTTPGate(ctx context.Context) {
 	gatePort := listenPortFromAddr(a.cfg.GateListen)
 	go a.startOneGate(ctx, a.cfg.GateListen, upstream)
 
->>>>>>> Stashed changes
 	// Start additional gates for other registered TCP services
 	rows, err := a.db.Query(`SELECT name, port FROM services WHERE protocol = 'tcp' AND port NOT IN (0, ?)`, gatePort)
 	if err == nil {
@@ -913,16 +895,8 @@ func (a *App) storeInlineFlow(r *http.Request, reqMeta, respMeta map[string]any,
 		BytesIn:      len(jsonString(reqMeta)),
 		BytesOut:     len(jsonString(respMeta)),
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
-<<<<<<< Updated upstream
-		UpdatedAt:    time.Now().UTC().Format(time.RFC3339),
-	}
-	if err := a.insertFlow(flow); err != nil {
-		log.Printf("storeInlineFlow insert error: %v", err)
-	} else {
-=======
 	}
 	if err := a.insertFlow(flow); err == nil {
->>>>>>> Stashed changes
 		a.enrichFlow(&flow)
 		a.broadcastFlow(flow)
 	}
@@ -1282,10 +1256,6 @@ func (a *App) handleEVE(raw string) error {
 		BytesIn:      asInt(ev["bytes_toserver"]),
 		BytesOut:     asInt(ev["bytes_toclient"]),
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
-<<<<<<< Updated upstream
-		UpdatedAt:    time.Now().UTC().Format(time.RFC3339),
-=======
->>>>>>> Stashed changes
 	}
 
 	if err := a.insertFlow(flow); err != nil {
@@ -1532,11 +1502,7 @@ func (a *App) insertFlow(f Flow) error {
 	respRaw, _ := json.Marshal(f.RawResponse)
 	reqHash, reqStore := a.payloadRef(reqRaw)
 	respHash, respStore := a.payloadRef(respRaw)
-<<<<<<< Updated upstream
-	_, err := a.db.Exec(`INSERT INTO flows (id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,req_hash,resp_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-=======
 	_, err := a.db.Exec(`INSERT INTO flows (id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at,req_hash,resp_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
->>>>>>> Stashed changes
 		f.ID, intPtrToAny(f.ServiceID), f.Direction, f.StartTS, f.EndTS, reqStore, respStore, f.Hash, boolInt(f.Stable), boolInt(f.Checker), boolInt(f.Banned), f.ResponseCode, f.FlowID, f.SrcIP, f.DstIP, f.SrcPort, f.DstPort, f.Proto, f.PktCount, f.BytesIn, f.BytesOut, f.CreatedAt, reqHash, respHash)
 	return err
 }
@@ -2306,26 +2272,6 @@ func (a *App) loadDefaultMarks(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "count": len(defaults)})
 }
 
-<<<<<<< Updated upstream
-func (a *App) bannedCounts(w http.ResponseWriter, _ *http.Request) {
-	rows, err := a.db.Query(`SELECT service_id, COUNT(*) FROM flows WHERE banned = 1 AND service_id IS NOT NULL AND service_id > 0 GROUP BY service_id`)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	defer rows.Close()
-	counts := map[int]int{}
-	for rows.Next() {
-		var sid, count int
-		if rows.Scan(&sid, &count) == nil {
-			counts[sid] = count
-		}
-	}
-	writeJSON(w, http.StatusOK, counts)
-}
-
-=======
->>>>>>> Stashed changes
 func (a *App) listFlows(w http.ResponseWriter, r *http.Request) {
 	page := max(1, parseInt(r.URL.Query().Get("page"), 1))
 	size := max(1, min(500, parseInt(r.URL.Query().Get("size"), 50)))
@@ -3366,15 +3312,7 @@ func (a *App) forwardMirror(raw string) {
 	}
 	for _, t := range cfg.Targets {
 		go func(target MirrorTarget) {
-<<<<<<< Updated upstream
-			targetIP := target.IP
-			if targetIP == "127.0.0.1" || targetIP == "localhost" {
-				targetIP = "172.28.0.1"
-			}
-			addr := net.JoinHostPort(targetIP, strconv.Itoa(target.Port))
-=======
 			addr := net.JoinHostPort(target.IP, strconv.Itoa(target.Port))
->>>>>>> Stashed changes
 			conn, err := net.DialTimeout("tcp", addr, 300*time.Millisecond)
 			if err != nil {
 				return
@@ -3442,12 +3380,8 @@ func (a *App) runMirrorTick() {
 	if !cfg.Enabled || len(cfg.Targets) == 0 {
 		return
 	}
-<<<<<<< Updated upstream
-	rows, err := a.db.Query(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at FROM flows WHERE banned = 1 ORDER BY created_at DESC LIMIT 50`)
-=======
 	since := time.Now().Add(-12 * time.Second)
 	rows, err := a.db.Query(`SELECT id,service_id,direction,start_ts,end_ts,raw_request,raw_response,hash,stable,checker,banned,response_code,flow_id,src_ip,dst_ip,src_port,dst_port,proto,pkt_count,bytes_in,bytes_out,created_at,updated_at FROM flows WHERE banned = 1 AND created_at >= ? ORDER BY created_at DESC LIMIT 200`, since.UTC().Format(time.RFC3339))
->>>>>>> Stashed changes
 	if err != nil {
 		log.Printf("mirror banned query: %v", err)
 		return
@@ -3466,12 +3400,7 @@ func (a *App) runMirrorTick() {
 				t.Port = a.servicePort(*flow.ServiceID)
 			}
 			payload, _ := json.Marshal(map[string]any{"type": "flagmate_mirror", "flow": flow})
-<<<<<<< Updated upstream
-			rawReq := rebuildRawRequest(flow.RawRequest)
-			go a.sendMirrorPayloadRaw(t, string(payload), rawReq, flow.ServiceID, flow.Hash, flow.ID)
-=======
 			go a.sendMirrorPayloadRaw(t, string(payload))
->>>>>>> Stashed changes
 		}
 	}
 }
@@ -3518,80 +3447,15 @@ func (a *App) mirrorMarkedServiceGroups(cfg ServiceMirrorConfig, targets []Mirro
 	}
 }
 
-<<<<<<< Updated upstream
-func (a *App) sendMirrorPayloadRaw(target MirrorTarget, payload, rawReq string, serviceIDPtr *int, hash string, flowID string) {
-	targetIP := target.IP
-	if targetIP == "127.0.0.1" || targetIP == "localhost" {
-		targetIP = "172.28.0.1"
-	}
-	addr := net.JoinHostPort(targetIP, strconv.Itoa(target.Port))
-	serviceID := 0
-	if serviceIDPtr != nil {
-		serviceID = *serviceIDPtr
-	}
-	conn, err := net.DialTimeout("tcp", addr, 700*time.Millisecond)
-	if err != nil {
-		a.recordMirrorAttempt(serviceID, hash, flowID, target, false, "", "")
-=======
 func (a *App) sendMirrorPayloadRaw(target MirrorTarget, payload string) {
 	addr := net.JoinHostPort(target.IP, strconv.Itoa(target.Port))
 	conn, err := net.DialTimeout("tcp", addr, 700*time.Millisecond)
 	if err != nil {
->>>>>>> Stashed changes
 		return
 	}
 	defer conn.Close()
 	_ = conn.SetWriteDeadline(time.Now().Add(700 * time.Millisecond))
-<<<<<<< Updated upstream
-
-	// Determine protocol and send appropriate payload
-	var resp string
-	if strings.Contains(rawReq, "websocket upgrade") {
-		// WebSocket: send each frame as a separate write
-		frames := strings.Split(rawReq, "\n")
-		for _, frame := range frames {
-			frame = strings.TrimSpace(frame)
-			if frame == "" || frame == "websocket upgrade" {
-				continue
-			}
-			conn.Write([]byte(frame + "\n"))
-			time.Sleep(50 * time.Millisecond)
-		}
-		_ = conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
-		buf := make([]byte, 4096)
-		n, _ := conn.Read(buf)
-		resp = strings.TrimSpace(string(buf[:n]))
-	} else if rawReq != "" {
-		// Raw body (HTTP body or TCP payload)
-		conn.Write([]byte(rawReq))
-		_ = conn.SetReadDeadline(time.Now().Add(700 * time.Millisecond))
-		buf := make([]byte, 4096)
-		n, _ := conn.Read(buf)
-		resp = strings.TrimSpace(string(buf[:n]))
-	} else {
-		// Fallback: send JSON envelope
-		conn.Write([]byte(payload + "\n"))
-		_ = conn.SetReadDeadline(time.Now().Add(700 * time.Millisecond))
-		buf := make([]byte, 4096)
-		n, _ := conn.Read(buf)
-		resp = strings.TrimSpace(string(buf[:n]))
-	}
-
-	flag := ""
-	if strings.Contains(resp, "flag{") || strings.Contains(resp, "flag:") {
-		re := regexp.MustCompile(`(?i)(?:\b[A-Za-z0-9_+\-=]{31}\b|flag\{[^\s{}]{4,128}\})`)
-		m := re.FindString(resp)
-		if m != "" {
-			flag = m
-		}
-	}
-	a.recordMirrorAttempt(serviceID, hash, flowID, target, flag != "", flag, resp)
-	if flag != "" && target.Webhook != "" {
-		go a.sendFlagWebhook(target.Webhook, flag, targetIP, target.Port, serviceID, hash)
-	}
-=======
 	conn.Write([]byte(payload + "\n"))
->>>>>>> Stashed changes
 }
 
 func (a *App) servicePort(serviceID int) int {
@@ -3712,40 +3576,6 @@ func (a *App) recordMirrorAttempt(serviceID int, hash, flowID string, target Mir
 	_, _ = a.db.Exec(`INSERT INTO mirror_attempts(service_id,hash,flow_id,target_ip,target_port,success,flag,response,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, serviceID, hash, flowID, target.IP, target.Port, boolInt(success), flag, response, time.Now().UTC().Format(time.RFC3339))
 }
 
-<<<<<<< Updated upstream
-func rebuildRawRequest(req map[string]any) string {
-	// For TCP/netcat services, send just the request body
-	if body := asString(req["body"]); body != "" {
-		return body + "\n"
-	}
-	// Fallback: send the query string (GET params)
-	if query := asString(req["query"]); query != "" {
-		return query + "\n"
-	}
-	// Last resort: send the URI
-	uri := asString(req["uri"])
-	if uri == "" {
-		uri = asString(req["url"])
-	}
-	if uri != "" {
-		return uri + "\n"
-	}
-	return ""
-}
-
-func (a *App) sendFlagWebhook(url, flag, targetIP string, targetPort, serviceID int, hash string) {
-	payload, _ := json.Marshal(map[string]any{"flag": flag, "target_ip": targetIP, "target_port": targetPort, "service_id": serviceID, "hash": hash, "timestamp": time.Now().UTC().Format(time.RFC3339)})
-	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(string(payload)))
-	if err != nil {
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 3 * time.Second}
-	client.Do(req)
-}
-
-=======
->>>>>>> Stashed changes
 func extractFlag(src string) string {
 	re := regexp.MustCompile(`(?i)([a-z0-9_]+\{[^\s{}]{4,128}\}|flag\{[^\s{}]{4,128}\}|test\{[^\s{}]{4,128}\})`)
 	match := re.FindString(src)
@@ -3757,11 +3587,7 @@ func scanFlow(rows *sql.Rows) (Flow, error) {
 	var reqRaw, respRaw string
 	var stable, checker, banned int
 	var sid sql.NullInt64
-<<<<<<< Updated upstream
-	if err := rows.Scan(&f.ID, &sid, &f.Direction, &f.StartTS, &f.EndTS, &reqRaw, &respRaw, &f.Hash, &stable, &checker, &banned, &f.ResponseCode, &f.FlowID, &f.SrcIP, &f.DstIP, &f.SrcPort, &f.DstPort, &f.Proto, &f.PktCount, &f.BytesIn, &f.BytesOut, &f.CreatedAt, &f.UpdatedAt); err != nil {
-=======
 	if err := rows.Scan(&f.ID, &sid, &f.Direction, &f.StartTS, &f.EndTS, &reqRaw, &respRaw, &f.Hash, &stable, &checker, &banned, &f.ResponseCode, &f.FlowID, &f.SrcIP, &f.DstIP, &f.SrcPort, &f.DstPort, &f.Proto, &f.PktCount, &f.BytesIn, &f.BytesOut, &f.CreatedAt); err != nil {
->>>>>>> Stashed changes
 		return f, err
 	}
 	if sid.Valid {
@@ -3780,11 +3606,7 @@ func scanFlowRow(row *sql.Row) (Flow, error) {
 	var reqRaw, respRaw string
 	var stable, checker, banned int
 	var sid sql.NullInt64
-<<<<<<< Updated upstream
-	if err := row.Scan(&f.ID, &sid, &f.Direction, &f.StartTS, &f.EndTS, &reqRaw, &respRaw, &f.Hash, &stable, &checker, &banned, &f.ResponseCode, &f.FlowID, &f.SrcIP, &f.DstIP, &f.SrcPort, &f.DstPort, &f.Proto, &f.PktCount, &f.BytesIn, &f.BytesOut, &f.CreatedAt, &f.UpdatedAt); err != nil {
-=======
 	if err := row.Scan(&f.ID, &sid, &f.Direction, &f.StartTS, &f.EndTS, &reqRaw, &respRaw, &f.Hash, &stable, &checker, &banned, &f.ResponseCode, &f.FlowID, &f.SrcIP, &f.DstIP, &f.SrcPort, &f.DstPort, &f.Proto, &f.PktCount, &f.BytesIn, &f.BytesOut, &f.CreatedAt); err != nil {
->>>>>>> Stashed changes
 		return f, err
 	}
 	if sid.Valid {
