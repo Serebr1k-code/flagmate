@@ -860,7 +860,9 @@ func (a *App) storeInlineFlow(r *http.Request, reqMeta, respMeta map[string]any,
 		BytesOut:     len(jsonString(respMeta)),
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
 	}
-	if err := a.insertFlow(flow); err == nil {
+	if err := a.insertFlow(flow); err != nil {
+		log.Printf("storeInlineFlow insert error: %v (id=%s)", err, flow.ID)
+	} else {
 		a.enrichFlow(&flow)
 		a.broadcastFlow(flow)
 	}
